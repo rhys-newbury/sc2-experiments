@@ -1,0 +1,24 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Train",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/outcome_forecast/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/outcome_forecast",
+            "args": [
+                "--workspace=workspace",
+                "--epoch=10",
+                "--config_file=cfg/base.yml",
+                "--pbar",
+                "--brief=testing this"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,24 @@
+dataset:
+  - type: sc2
+    args:
+      features:
+        - minimap
+        - scalar
+criterion:
+  - type: win-bce
+    args: {}
+model:
+  - type: win-pred
+    args: {}
+    optimizer:
+      type: sgd
+      args:
+        step_interval: 1
+        lr: 0.0001
+      scheduler:
+        type: poly
+        args:
+          max_iter: 25
+          power: 0.9
+logger:
+  interval: 500
