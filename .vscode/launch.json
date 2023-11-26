@@ -15,9 +15,10 @@
             "args": [
                 "--workspace=workspace",
                 "--epoch=10",
-                "--config_file=cfg/base.yml",
+                "--config-file=cfg/base.yml",
                 "--pbar",
-                "--brief=testing this"
+                "--brief=testing this",
+                "--workers=0"
             ]
         }
     ]

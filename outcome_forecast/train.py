@@ -7,6 +7,7 @@ import src
 import torch
 import typer
 import yaml
+from torch import Tensor
 from konductor.init import ExperimentInitConfig, ModuleInitConfig
 from konductor.metadata import DataManager
 from konductor.trainer.pytorch import (
@@ -21,6 +22,13 @@ from typing_extensions import Annotated
 
 class Trainer(PyTorchTrainer):
     """Specialize for prediciton"""
+
+    def data_transform(self, data: dict[str, Tensor]) -> dict[str, Tensor]:
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            data = {k: d.cuda(non_blocking=True) for k, d in data.items()}
+        stream.synchronize()
+        return data
 
 
 app = typer.Typer()

@@ -1,4 +1,1 @@
-import data
-import loss
-import model
-import stats
+from . import data, model, loss, stats

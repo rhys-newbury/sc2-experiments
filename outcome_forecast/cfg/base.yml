@@ -1,15 +1,30 @@
 dataset:
-  - type: sc2
+  - type: sc2-replay
     args:
       features:
-        - minimap
-        - scalar
+        - minimap_features
+        - scalar_features
+    loader:
+      type: PYTORCH_V1
+      args:
+        batch_size: 8
+        drop_last: true
 criterion:
   - type: win-bce
     args: {}
 model:
-  - type: win-pred
-    args: {}
+  - type: win-pred-basic
+    args:
+      image_enc:
+        type: image-v1
+        args: {}
+      scalar_enc:
+        type: scalar-v1
+        args: {}
+      decoder:
+        type: scalar-v1
+        args:
+          out_ch: 1
     optimizer:
       type: sgd
       args:
