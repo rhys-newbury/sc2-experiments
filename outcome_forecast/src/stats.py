@@ -4,6 +4,7 @@ Statistics for game outcome prediction
 from typing import Sequence
 
 from torch import Tensor
+from konductor.data import get_dataset_properties
 from konductor.init import ExperimentInitConfig
 from konductor.metadata.base_statistic import Statistic, STATISTICS_REGISTRY
 
@@ -14,7 +15,9 @@ class WinAUC(Statistic):
 
     @classmethod
     def from_config(cls, cfg: ExperimentInitConfig, **extras):
-        return cls(**extras)
+        data_cfg = get_dataset_properties(cfg)
+        timepoints = list(range(0, data_cfg["time_max"], data_cfg["time_stride"]))
+        return cls(timepoints=timepoints, **extras)
 
     def get_keys(self) -> list[str]:
         return [f"auc_{t}" for t in self.timepoints]

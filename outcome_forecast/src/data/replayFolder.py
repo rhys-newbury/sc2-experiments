@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 
+import numpy as np
 import torch
 from konductor.data import DATASET_REGISTRY, DatasetConfig, ExperimentInitConfig, Split
 from konductor.data._pytorch.dataloader import DataloaderV1Config
@@ -15,7 +16,7 @@ from sc2_replay_reader import (
 )
 from torch.utils.data import Dataset
 
-from .utils import upper_bound
+from .utils import upper_bound, find_closest_indicies
 
 
 class SC2Replay(Dataset):
@@ -25,6 +26,8 @@ class SC2Replay(Dataset):
         split: Split,
         train_ratio: float,
         features: set[str] | None,
+        time_stride: float,
+        time_max: float,
     ) -> None:
         super().__init__()
         self.features = features
@@ -51,6 +54,11 @@ class SC2Replay(Dataset):
         self.n_replays = int(self.n_replays)
         assert self.n_replays > 0, "No replays in dataset"
 
+        _loop_per_min = 22.4 * 60
+        self._target_game_loops = torch.arange(
+            0, time_max * _loop_per_min, time_stride * _loop_per_min, dtype=torch.int
+        )
+
     def __len__(self) -> int:
         return self.n_replays
 
@@ -64,12 +72,29 @@ class SC2Replay(Dataset):
 
         self.parser.parse_replay(self.db_handle.getEntry(db_index))
 
-        outputs = self.parser.sample(0)
+        outputs_list = self.parser.sample(0)
         if self.features is not None:
-            outputs = {k: torch.as_tensor(outputs[k]) for k in self.features}
-        outputs["win"] = torch.as_tensor(
-            self.parser.data.playerResult == Result.Win, dtype=torch.float32
-        ).unsqueeze(0)
+            outputs_list = {k: [outputs_list[k]] for k in self.features}
+
+        sample_indicies = find_closest_indicies(
+            self.parser.data.gameStep, self._target_game_loops[1:]
+        )
+        for idx in sample_indicies:
+            if idx == -1:
+                sample = {k: np.zeros_like(outputs_list[k][-1]) for k in outputs_list}
+            else:
+                sample = self.parser.sample(int(idx.item()))
+            for k in outputs_list:
+                outputs_list[k].append(sample[k])
+
+        outputs = {
+            "win": torch.as_tensor(
+                self.parser.data.playerResult == Result.Win, dtype=torch.float32
+            ).unsqueeze(0),
+            "valid": torch.cat([torch.tensor([True]), sample_indicies != -1]),
+        }
+        for k in outputs_list:
+            outputs[k] = torch.stack([torch.as_tensor(o) for o in outputs_list[k]])
 
         return outputs
 
@@ -83,6 +108,8 @@ class SC2ReplayConfig(DatasetConfig):
 
     features: set[str] | None = None
     train_ratio: float = 0.8  # Portion of all data to use for training
+    time_stride: float = 2  # Minutes
+    time_max: float = 30  # Minutes
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
@@ -93,6 +120,7 @@ class SC2ReplayConfig(DatasetConfig):
         # If features is not None, ensure that it is a set
         if self.features is not None and not isinstance(self.features, set):
             self.features = set(self.features)
+        assert self.time_stride < self.time_max
 
     @property
     def properties(self) -> Dict[str, Any]:
