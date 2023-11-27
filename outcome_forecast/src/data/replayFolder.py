@@ -62,6 +62,7 @@ class SC2Replay(Dataset):
     def __len__(self) -> int:
         return self.n_replays
 
+    # @profile
     def __getitem__(self, index: int):
         file_index = upper_bound(self._accumulated_replays, index)
         self.db_handle.open(self.replays[file_index])
@@ -75,6 +76,8 @@ class SC2Replay(Dataset):
         outputs_list = self.parser.sample(0)
         if self.features is not None:
             outputs_list = {k: [outputs_list[k]] for k in self.features}
+        else:
+            outputs_list = {k: [outputs_list[k]] for k in outputs_list}
 
         sample_indicies = find_closest_indicies(
             self.parser.data.gameStep, self._target_game_loops[1:]
