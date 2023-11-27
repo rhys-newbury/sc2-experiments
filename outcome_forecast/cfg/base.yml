@@ -7,13 +7,13 @@ dataset:
     val_loader:
       type: PYTORCH_V1
       args:
-        batch_size: 16
+        batch_size: 32
         drop_last: true
     train_loader:
       type: PYTORCH_V1
       args:
         shuffle: true
-        batch_size: 8
+        batch_size: 32
         drop_last: true
 criterion:
   - type: win-bce

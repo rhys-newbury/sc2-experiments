@@ -49,7 +49,6 @@ class ImageEncV1(nn.Module):
                 nn.ReLU(),
                 nn.Flatten(),
                 nn.Linear(hidden_ch * 3 * 3, out_ch),
-                nn.ReLU(),
             ]
         )
         self._out_ch = out_ch
@@ -80,17 +79,11 @@ class ScalarEncoderV1(nn.Module):
             self.encoder.extend(
                 [
                     nn.Linear(_hidden_ch, 2 * hidden_ch),
-                    nn.LayerNorm(2 * hidden_ch),
+                    nn.GroupNorm(4, 2 * hidden_ch),
                     nn.LeakyReLU(),
                 ]
             )
-        self.encoder.extend(
-            [
-                nn.Linear(2 * hidden_ch, out_ch),
-                nn.LayerNorm(out_ch),
-                nn.ReLU(),
-            ]
-        )
+        self.encoder.append(nn.Linear(2 * hidden_ch, out_ch))
         self._out_ch = out_ch
 
     @property
