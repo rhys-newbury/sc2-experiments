@@ -8,7 +8,7 @@ from konductor.init import ExperimentInitConfig
 from konductor.metadata.base_statistic import Statistic, STATISTICS_REGISTRY
 
 
-@STATISTICS_REGISTRY.register_module("win_auc")
+@STATISTICS_REGISTRY.register_module("win-auc")
 class WinAUC(Statistic):
     """AUC of win prediction performance at several timepoints (min) in the game"""
 

@@ -65,7 +65,7 @@ def main(
     data_manager = DataManager.default_build(
         exp_cfg,
         train_modules.get_checkpointables(),
-        {"win_auc": src.stats.WinAUC.from_config(exp_cfg)},
+        {"win-auc": src.stats.WinAUC.from_config(exp_cfg)},
     )
 
     if brief is not None:

@@ -1,25 +1,37 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
-from konductor.init import ExperimentInitConfig, Split
 
 import torch
-from konductor.data import DatasetConfig, DATASET_REGISTRY, Split
+from konductor.data import DATASET_REGISTRY, DatasetConfig, ExperimentInitConfig, Split
 from konductor.data._pytorch.dataloader import DataloaderV1Config
+from sc2_replay_reader import (
+    GAME_INFO_FILE,
+    ReplayDatabase,
+    ReplayParser,
+    Result,
+    setReplayDBLoggingLevel,
+    spdlog_lvl,
+)
 from torch.utils.data import Dataset
-from sc2_replay_reader import ReplayDatabase, ReplayParser, GAME_INFO_FILE, Result
 
 from .utils import upper_bound
 
 
 class SC2Replay(Dataset):
     def __init__(
-        self, basepath: Path, split: Split, train_ratio: float, features: set[str]
+        self,
+        basepath: Path,
+        split: Split,
+        train_ratio: float,
+        features: set[str] | None,
     ) -> None:
         super().__init__()
         self.features = features
         self.db_handle = ReplayDatabase()
         self.parser = ReplayParser(GAME_INFO_FILE)
+
+        setReplayDBLoggingLevel(spdlog_lvl.warn)
 
         if basepath.is_file():
             self.replays = [basepath]
@@ -45,7 +57,7 @@ class SC2Replay(Dataset):
     def __getitem__(self, index: int):
         file_index = upper_bound(self._accumulated_replays, index)
         self.db_handle.open(self.replays[file_index])
-        db_index = index - self._accumulated_replays[file_index]
+        db_index = index - int(self._accumulated_replays[file_index].item())
         assert (  # This should hold if calculation checks out
             db_index < self.db_handle.size()
         ), f"{db_index} exceeds {self.db_handle.size()}"
@@ -53,7 +65,8 @@ class SC2Replay(Dataset):
         self.parser.parse_replay(self.db_handle.getEntry(db_index))
 
         outputs = self.parser.sample(0)
-        outputs = {k: torch.as_tensor(outputs[k]) for k in self.features}
+        if self.features is not None:
+            outputs = {k: torch.as_tensor(outputs[k]) for k in self.features}
         outputs["win"] = torch.as_tensor(
             self.parser.data.playerResult == Result.Win, dtype=torch.float32
         ).unsqueeze(0)
