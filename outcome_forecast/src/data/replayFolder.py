@@ -90,7 +90,7 @@ class SC2Replay(Dataset):
         outputs = {
             "win": torch.as_tensor(
                 self.parser.data.playerResult == Result.Win, dtype=torch.float32
-            ).unsqueeze(0),
+            ),
             "valid": torch.cat([torch.tensor([True]), sample_indicies != -1]),
         }
         for k in outputs_list:

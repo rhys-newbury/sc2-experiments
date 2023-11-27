@@ -9,8 +9,8 @@ class WinBCE(nn.BCEWithLogitsLoss):
         super().__init__(reduction="none")
 
     def forward(self, pred: Tensor, data: dict[str, Tensor]) -> dict[str, Tensor]:
-        loss = super().forward(pred, data["win"].repeat(1, pred.shape[1]).unsqueeze(-1))
-        loss *= data["valid"].unsqueeze(-1)
+        loss = super().forward(pred, data["win"].unsqueeze(-1).repeat(1, pred.shape[1]))
+        loss *= data["valid"]
         return {"win-bce": loss.mean()}
 
 
