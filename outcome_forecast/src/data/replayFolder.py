@@ -131,7 +131,7 @@ class SC2ReplayConfig(DatasetConfig):
         ret.update(self.__dict__)
         return ret
 
-    def get_instance(self, split: Split) -> Any:
+    def get_dataloader(self, split: Split) -> Any:
         known_unused = {"train_loader", "val_loader", "basepath"}
         dataset = self.init_auto_filter(
             SC2Replay, known_unused=known_unused, split=split
