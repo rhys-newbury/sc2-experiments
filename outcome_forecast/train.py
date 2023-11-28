@@ -8,6 +8,7 @@ import torch
 import typer
 import yaml
 from torch import Tensor
+from konductor.metadata.loggers import TBLogger, ParquetLogger, MultiWriter
 from konductor.init import ExperimentInitConfig, ModuleInitConfig
 from konductor.metadata import DataManager
 from konductor.trainer.pytorch import (
@@ -66,6 +67,7 @@ def main(
         exp_cfg,
         train_modules.get_checkpointables(),
         {"win-auc": src.stats.WinAUC.from_config(exp_cfg)},
+        MultiWriter([TBLogger(exp_cfg.work_dir), ParquetLogger(exp_cfg.work_dir)]),
     )
 
     if brief is not None:
