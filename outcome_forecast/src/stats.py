@@ -45,7 +45,10 @@ class WinAUC(Statistic):
     @classmethod
     def from_config(cls, cfg: ExperimentInitConfig, **extras):
         data_cfg = get_dataset_properties(cfg)
-        timepoints = list(range(0, data_cfg["time_max"], data_cfg["time_stride"]))
+        if "timepoints" in data_cfg:
+            timepoints = data_cfg["timepoints"].arange()
+        else:
+            timepoints = None
         return cls(timepoints=timepoints, **extras)
 
     def get_keys(self) -> list[str]:
@@ -61,9 +64,7 @@ class WinAUC(Statistic):
             in minutes where to sample the accuracy of the model. If None given
             defauts to every 2min up to 30min.
         """
-        self.timepoints = list(range(2, 32, 2)) if timepoints is None else timepoints
-        self._game_loops = [int(t * 60 * 22.4) for t in self.timepoints]  # Game stp
-
+        self.timepoints = torch.arange(2, 32, 2) if timepoints is None else timepoints
         self.auc_thresholds = self.make_thresholds(auc_thresholds)
 
     @staticmethod

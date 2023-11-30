@@ -19,6 +19,19 @@ from torch.utils.data import Dataset
 from .utils import upper_bound, find_closest_indicies
 
 
+@dataclass
+class TimeRange:
+    min: float
+    max: float
+    step: float
+
+    def __post_init__(self):
+        assert self.min < self.max
+
+    def arange(self):
+        return torch.arange(self.min, self.max, self.step)
+
+
 class SC2Replay(Dataset):
     def __init__(
         self,
@@ -26,8 +39,7 @@ class SC2Replay(Dataset):
         split: Split,
         train_ratio: float,
         features: set[str] | None,
-        time_stride: float,
-        time_max: float,
+        timepoints: TimeRange,
     ) -> None:
         super().__init__()
         self.features = features
@@ -55,9 +67,7 @@ class SC2Replay(Dataset):
         assert self.n_replays > 0, "No replays in dataset"
 
         _loop_per_min = 22.4 * 60
-        self._target_game_loops = torch.arange(
-            0, time_max * _loop_per_min, time_stride * _loop_per_min, dtype=torch.int
-        )
+        self._target_game_loops = (timepoints.arange() * _loop_per_min).to(torch.int)
 
     def __len__(self) -> int:
         return self.n_replays
@@ -111,8 +121,7 @@ class SC2ReplayConfig(DatasetConfig):
 
     features: set[str] | None = None
     train_ratio: float = 0.8  # Portion of all data to use for training
-    time_stride: float = 2  # Minutes
-    time_max: float = 30  # Minutes
+    timepoints: TimeRange = TimeRange(0, 30, 2)  # Minutes
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
@@ -123,7 +132,8 @@ class SC2ReplayConfig(DatasetConfig):
         # If features is not None, ensure that it is a set
         if self.features is not None and not isinstance(self.features, set):
             self.features = set(self.features)
-        assert self.time_stride < self.time_max
+        if isinstance(self.timepoints, dict):
+            self.timepoints = TimeRange(**self.timepoints)
 
     @property
     def properties(self) -> Dict[str, Any]:

@@ -4,6 +4,10 @@ dataset:
       features:
         - minimap_features
         - scalar_features
+      timepoints:
+        min: 2
+        max: 30
+        step: 0.5
     val_loader:
       type: PYTORCH_V1
       args:
@@ -32,14 +36,14 @@ model:
         args:
           out_ch: 1
     optimizer:
-      type: sgd
+      type: adam
       args:
         step_interval: 1
-        lr: 0.0001
+        lr: 1.e-4
       scheduler:
         type: poly
         args:
-          max_iter: 25
+          max_iter: 5
           power: 0.9
 logger:
-  interval: 500
+  interval: 50
