@@ -10,6 +10,7 @@ from sklearn.model_selection import KFold
 import xgboost
 import timeit
 import torch
+from sklearn.model_selection import GridSearchCV
 
 time = TimeRange(0, 15, 0.3)  # Minutes,
 
@@ -34,6 +35,8 @@ for time_step, current_time in enumerate(time.arange()):
 t2 = timeit.default_timer()
 min_game_time = 5
 # process and save as numpy files
+num_less = 0
+total = 0
 for idx, sample in enumerate(dataloader):
     print(idx)
     print(f"Took {timeit.default_timer() - t2}s")
@@ -43,7 +46,6 @@ for idx, sample in enumerate(dataloader):
 
     # find the index of minimum element from the array
     five_minute_index = difference_array.argmin()
-
     mask = sample["valid"].sum(axis=1) > five_minute_index
 
     for time_step, current_time in enumerate(time.arange()):
@@ -72,6 +74,8 @@ for idx, sample in enumerate(dataloader):
 del dataloader
 del dataset
 
+results = []
+std_dev = []
 for time_step, current_time in enumerate(time.arange()):
     print(f"Running current_time: {current_time}")
     file = f"./{time_step}_x.npy"
@@ -99,8 +103,31 @@ for time_step, current_time in enumerate(time.arange()):
     )
     xgb_scores = cross_val_score(xgb, X, y, cv=cv, n_jobs=-1)
     t2 = timeit.default_timer()
+    results.append(xgb_scores.mean())
+    std_dev.append(xgb_scores.std())
     print(f"Took {t2 - t1}s")
     print(
         "XGBoost: %0.4f accuracy with a standard deviation of %0.4f"
         % (xgb_scores.mean(), xgb_scores.std())
     )
+
+import matplotlib.pyplot as plt
+
+plt.plot((time.arange() * 60).tolist(), results, label="Results")
+
+plt.fill_between(
+    (time.arange() * 60).tolist(),
+    [result - std for result, std in zip(results, std_dev)],
+    [result + std for result, std in zip(results, std_dev)],
+    alpha=0.2,
+    label="Standard Deviation",
+)
+
+# Add labels and title
+plt.xlabel("X Axis Label")
+plt.ylabel("Y Axis Label")
+plt.title("Line Plot with Standard Deviation")
+
+# Add legend
+plt.legend()
+plt.savefig("yeet.png")
