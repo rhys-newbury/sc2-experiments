@@ -25,10 +25,11 @@ class Trainer(PyTorchTrainer):
     """Specialize for prediciton"""
 
     def data_transform(self, data: dict[str, Tensor]) -> dict[str, Tensor]:
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
-            data = {k: d.cuda(non_blocking=True) for k, d in data.items()}
-        stream.synchronize()
+        if torch.cuda.is_available():
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                data = {k: d.cuda(non_blocking=True) for k, d in data.items()}
+            stream.synchronize()
 
         mask = data["valid"].sum(axis=1) > self.modules.trainloader.dataset.min_index
 
@@ -69,7 +70,7 @@ def main(
     data_manager = DataManager.default_build(
         exp_cfg,
         train_modules.get_checkpointables(),
-        {"win-auc": src.stats.WinAUC.from_config(exp_cfg)},
+        {"win-auc": src.stats.WinAUC.from_config(exp_cfg), "binary-acc": src.stats.BinaryAcc.from_config(exp_cfg)},
         MultiWriter([TBLogger(exp_cfg.work_dir), ParquetLogger(exp_cfg.work_dir)]),
     )
 
@@ -89,7 +90,8 @@ def main(
 
 
 if __name__ == "__main__":
-    comm.initialize()
+    if torch.cuda.is_available():
+        comm.initialize()
     torch.set_float32_matmul_precision("high")
     logging.basicConfig(
         format=f"%(asctime)s-RANK:{comm.get_local_rank()}-%(levelname)s-%(name)s: %(message)s",
