@@ -1,8 +1,5 @@
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Tuple, Callable
-from enum import Enum
-import numpy as np
+from typing import Dict, Tuple, Callable, Literal
 import torch
 from konductor.data import DATASET_REGISTRY, DatasetConfig, ExperimentInitConfig, Split
 from konductor.data._pytorch.dataloader import DataloaderV1Config
@@ -10,23 +7,24 @@ from sc2_replay_reader import (
     GAME_INFO_FILE,
     ReplayDatabase,
     ReplayParser,
-    Result,
     setReplayDBLoggingLevel,
     spdlog_lvl,
 )
 from torch.utils.data import Dataset
 
-from .utils import upper_bound, find_closest_indicies
+from .utils import upper_bound
 
 ENUM_KEYS = {"playerRace", "playerResult"}
 LambdaFunctionType = Callable[[ReplayParser], float | int]
+SQL_TYPES = Literal["INTEGER", "FLOAT", "TEXT"]
+
 
 class SC2Replay(Dataset):
     def __init__(
         self,
         basepath: Path,
         features: set[str],
-        lambda_columns: Dict[str, Tuple[str, LambdaFunctionType]]
+        lambda_columns: Dict[str, Tuple[SQL_TYPES, LambdaFunctionType]],
     ) -> None:
         super().__init__()
         self.features = features
@@ -66,15 +64,15 @@ class SC2Replay(Dataset):
 
         self.parser.parse_replay(self.db_handle.getEntry(db_index))
         data = {p: getattr(self.parser.data, p, None) for p in self.features}
-        data = {k: int(v) if k in ENUM_KEYS else v for k,v in data.items()}
-        
+        data = {k: int(v) if k in ENUM_KEYS else v for k, v in data.items()}
+
         for k, (_, f) in self.lambda_columns.items():
-            data[k] = f(self.parser)        
-               
+            data[k] = f(self.parser)
+
         return {
             "partition": str(self.replays[file_index].name),
             "idx": db_index,
-            **data
+            **data,
         }
 
     def __iter__(self):
