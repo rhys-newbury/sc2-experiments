@@ -40,6 +40,7 @@ class SC2Replay(Dataset):
         train_ratio: float,
         features: set[str] | None,
         timepoints: TimeRange,
+        min_game_time: float,
     ) -> None:
         super().__init__()
         self.features = features
@@ -68,6 +69,8 @@ class SC2Replay(Dataset):
 
         _loop_per_min = 22.4 * 60
         self._target_game_loops = (timepoints.arange() * _loop_per_min).to(torch.int)
+        difference_array = torch.absolute(timepoints.arange() - min_game_time)
+        self.min_index = difference_array.argmin()
 
     def __len__(self) -> int:
         return self.n_replays
@@ -122,6 +125,7 @@ class SC2ReplayConfig(DatasetConfig):
     features: set[str] | None = None
     train_ratio: float = 0.8  # Portion of all data to use for training
     timepoints: TimeRange = TimeRange(0, 30, 2)  # Minutes
+    min_game_time: float = 5.0  # Minutes
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):

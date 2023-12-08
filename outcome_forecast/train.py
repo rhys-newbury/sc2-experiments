@@ -29,7 +29,10 @@ class Trainer(PyTorchTrainer):
         with torch.cuda.stream(stream):
             data = {k: d.cuda(non_blocking=True) for k, d in data.items()}
         stream.synchronize()
-        return data
+
+        mask = data["valid"].sum(axis=1) > self.modules.trainloader.dataset.min_index
+
+        return {k: d[mask, ...] for k, d in data.items()}
 
 
 app = typer.Typer()

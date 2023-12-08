@@ -35,8 +35,6 @@ for time_step, current_time in enumerate(time.arange()):
 t2 = timeit.default_timer()
 min_game_time = 5
 # process and save as numpy files
-num_less = 0
-total = 0
 for idx, sample in enumerate(dataloader):
     print(idx)
     print(f"Took {timeit.default_timer() - t2}s")
