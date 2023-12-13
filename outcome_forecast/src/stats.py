@@ -57,7 +57,7 @@ class BinaryAcc(Statistic):
         Args:
             timepoints (Sequence[int] | None, optional): Sequence of timepoints
             in minutes where to sample the accuracy of the model. If None given
-            defauts to every 2min up to 30min.
+            defaults to every 2min up to 30min.
         """
         self.timepoints = torch.arange(2, 32, 2) if timepoints is None else timepoints
 
@@ -67,14 +67,16 @@ class BinaryAcc(Statistic):
     def __call__(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> dict[str, float]:
-        """Calculate Binary accuracy of the win prediction closest to the previously specified timepoints
+        """Calculate Binary accuracy of the win prediction closest to the
+           previously specified timepoints
 
         Args:
             predictions (dict[str, Tensor]): Outputs of the model
             targets (dict[str, Tensor]): Loaded data, should contain win/loss
 
         Returns:
-            dict[str, float]: Dictionary of Binary Accuracy at each timepoint (until end of replay)
+            dict[str, float]: Dictionary of Binary Accuracy at each timepoint
+            (until end of replay)
         """
         result: dict[str, float] = {}
         pred_sig = torch.sigmoid(predictions)
@@ -137,7 +139,7 @@ class WinAUC(Statistic):
         Args:
             timepoints (Sequence[int] | None, optional): Sequence of timepoints
             in minutes where to sample the accuracy of the model. If None given
-            defauts to every 2min up to 30min.
+            defaults to every 2min up to 30min.
         """
         self.timepoints = torch.arange(2, 32, 2) if timepoints is None else timepoints
         self.auc_thresholds = self.make_thresholds(auc_thresholds)
@@ -211,7 +213,8 @@ class WinAUC(Statistic):
     def __call__(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> dict[str, float]:
-        """Calculate AUC of the win prediction closest to the previously specified timepoints
+        """Calculate AUC of the win prediction closest to the previously
+           specified timepoints
 
         Args:
             predictions (dict[str, Tensor]): Outputs of the model

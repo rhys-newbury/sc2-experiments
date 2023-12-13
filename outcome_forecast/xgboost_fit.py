@@ -4,13 +4,12 @@ from src.data.replayFolder import SC2Replay, Split, TimeRange
 import os
 from pathlib import Path
 from torch.utils.data import DataLoader
-from sklearn import preprocessing
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import KFold
 import xgboost
 import timeit
 import torch
-from sklearn.model_selection import GridSearchCV
+import matplotlib.pyplot as plt
 
 time = TimeRange(0, 15, 0.3)  # Minutes,
 
@@ -109,7 +108,6 @@ for time_step, current_time in enumerate(time.arange()):
         % (xgb_scores.mean(), xgb_scores.std())
     )
 
-import matplotlib.pyplot as plt
 
 plt.plot((time.arange() * 60).tolist(), results, label="Results")
 
