@@ -70,7 +70,10 @@ def main(
     data_manager = DataManager.default_build(
         exp_cfg,
         train_modules.get_checkpointables(),
-        {"win-auc": src.stats.WinAUC.from_config(exp_cfg), "binary-acc": src.stats.BinaryAcc.from_config(exp_cfg)},
+        {
+            "win-auc": src.stats.WinAUC.from_config(exp_cfg),
+            "binary-acc": src.stats.BinaryAcc.from_config(exp_cfg),
+        },
         MultiWriter([TBLogger(exp_cfg.work_dir), ParquetLogger(exp_cfg.work_dir)]),
     )
 

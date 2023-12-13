@@ -37,9 +37,9 @@ def _div_no_nan(a: Tensor, b: Tensor) -> Tensor:
     c[~torch.isfinite(c)] = 0
     return c
 
+
 @STATISTICS_REGISTRY.register_module("binary-acc")
 class BinaryAcc(Statistic):
-
     @classmethod
     def from_config(cls, cfg: ExperimentInitConfig, **extras):
         data_cfg = get_dataset_properties(cfg)
@@ -63,7 +63,7 @@ class BinaryAcc(Statistic):
 
     def get_keys(self) -> list[str]:
         return [f"binary_acc_{t}" for t in self.timepoints]
-    
+
     def __call__(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> dict[str, float]:
@@ -101,7 +101,7 @@ class BinaryAcc(Statistic):
         """
         valid_predictions = predictions[valid_mask] > 0.5
         valid_targets = targets[valid_mask].bool()
-        
+
         correct_predictions = (valid_predictions == valid_targets).sum().item()
         total_valid_samples = valid_mask.sum().item()
 
