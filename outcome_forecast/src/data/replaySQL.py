@@ -16,8 +16,7 @@ from sc2_replay_reader import (
 )
 from torch.utils.data import Dataset
 import sqlite3
-from .utils import upper_bound, find_closest_indicies
-import pandas as pd
+from .utils import find_closest_indicies
 
 
 @dataclass
@@ -49,18 +48,28 @@ class SC2SQLReplay(Dataset):
         self.features = features
         self.db_handle = ReplayDatabase()
         self.parser = ReplayParser(GAME_INFO_FILE)
-        self.basepath = basepath
-
-        with sqlite3.connect(database) as conn:
-            # Use pandas to read SQL query directly into a DataFrame
-            self.data = pd.read_sql_query(sql_query, conn)
+        self.basepath = basepath      
+        self.sql_query = sql_query
 
         setReplayDBLoggingLevel(spdlog_lvl.warn)
 
-        self.n_replays = self.data.shape[0]
+        self.conn = sqlite3.connect(database)
+        self.cursor = self.conn.cursor()     
+        self.cursor.execute(sql_query.replace(" * ", " COUNT(*) "))
+
+        self.n_replays = self.cursor.fetchone()[0]
         self.n_replays *= train_ratio if split is Split.TRAIN else 1 - train_ratio
         self.n_replays = int(self.n_replays)
         assert self.n_replays > 0, "No replays in dataset"
+
+        # Extract and print column names
+        self.cursor.execute("PRAGMA table_info('game_data');")
+        # Fetch all rows containing column information
+        columns_info = self.cursor.fetchall()
+        self.column_names = [column[1] for column in columns_info]
+        self.file_name_idx = self.column_names.index("partition") 
+        self.idx_idx = self.column_names.index("idx") 
+
 
         _loop_per_min = 22.4 * 60
         self._target_game_loops = (timepoints.arange() * _loop_per_min).to(torch.int)
@@ -72,10 +81,13 @@ class SC2SQLReplay(Dataset):
 
     # @profile
     def __getitem__(self, index: int):
-        item = self.data.iloc[index]
+        
+        squery = self.sql_query[:-1] + f" LIMIT 1 OFFSET {index};"
+        self.cursor.execute(squery)        
+        result = self.cursor.fetchone()
 
-        self.db_handle.open(self.basepath / item.partition)
-        self.parser.parse_replay(self.db_handle.getEntry(item.idx))
+        self.db_handle.open(self.basepath / result[self.file_name_idx])
+        self.parser.parse_replay(self.db_handle.getEntry(result[self.idx_idx]))
 
         outputs_list = self.parser.sample(0)
         if self.features is not None:
