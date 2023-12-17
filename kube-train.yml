@@ -1,14 +1,14 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: sc2-convert
+  name: sc2-train1
 spec:
   maxRetry: 1
   minAvailable: 1
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 192
+    - replicas: 1
       name: serialize
       template:
         spec:
@@ -24,13 +24,12 @@ spec:
               image: mu00120825.eng.monash.edu.au:5021/sc2-experiments:latest
               command:
                 [
-                  ./sc2_converter,
-                  --replays=/mnt/storage/4.9.2/,
-                  --game=/mnt/storage/SC2/4.9.2-merged/Versions/Base74741/SC2_x64,
-                  --converter=action,
-                  --partition=/mnt/storage/492_partition/partition,
-                  --output=/mnt/storage/converted/4.9.2/db,
-                  --badfile=/mnt/storage/converted/4.9.2/badReplays/bad.txt,
+                  "python",
+                  "/app/outcome_forecast/train.py",
+                  "--workspace=/mnt/storage",
+                  "--config-file=/app/outcome_forecast/cfg/base.yml",
+                  "--epoch=100",
+                  "--workers=8",
                 ]
               env:
                 - name: DATAPATH
