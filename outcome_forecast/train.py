@@ -74,7 +74,16 @@ def main(
             "win-auc": src.stats.WinAUC.from_config(exp_cfg),
             "binary-acc": src.stats.BinaryAcc.from_config(exp_cfg),
         },
-        MultiWriter([TBLogger(exp_cfg.work_dir), ParquetLogger(exp_cfg.work_dir)]),
+        MultiWriter(
+            [
+                ParquetLogger(exp_cfg.work_dir),
+                TBLogger(
+                    exp_cfg.work_dir,
+                    "wandb" in exp_cfg.log_kwargs,
+                    **exp_cfg.log_kwargs.get("wandb", {})
+                ),
+            ]
+        ),
     )
 
     if brief is not None:
