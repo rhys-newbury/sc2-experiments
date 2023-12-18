@@ -1,0 +1,16 @@
+XGBOOST:
+  booster: gbtree
+  eta: 0.2
+  max_depth: 5
+  objective: binary:logistic
+  use_label_encoder: false
+  verbosity: 0
+
+MLP:
+  activation: relu
+  alpha: 0.0001
+  hidden_layer_sizes:
+  - 100
+  learning_rate_init: 0.001
+  max_iter: 1000
+  solver: adam

@@ -15,47 +15,38 @@ import matplotlib.pyplot as plt
 import typer
 from typing_extensions import Annotated
 from enum import Enum
+import yaml
 
 app = typer.Typer()
 
+current_script_path = Path(__file__).resolve().parent
 
-class model(Enum):
+
+class Model(Enum):
     XGBOOST = "xgboost"
     MLP = "mlp"
 
 
-def get_model(m: model):
+def get_model(m: Model, **config):
     def inner(random_state: int):
         match m:
-            case model.XGBOOST:
+            case Model.XGBOOST:
                 return xgboost.XGBClassifier(
-                    objective="binary:logistic",
-                    booster="gbtree",
-                    eta=0.2,
-                    max_depth=5,
-                    use_label_encoder=False,
-                    verbosity=0,
+                    **config,
                     random_state=random_state,
                 )
-            case model.MLP:
-                return MLPClassifier(
-                    hidden_layer_sizes=(
-                        100,
-                    ),  # You can customize the hidden layer structure
-                    activation="relu",
-                    solver="adam",  # Solver for weight optimization
-                    alpha=0.0001,  # L2 regularization term
-                    learning_rate_init=0.001,  # Initial learning rate
-                    max_iter=1000,  # Maximum number of iterations
-                    random_state=random_state,  # Random seed for reproducibility
-                )
+            case Model.MLP:
+                return MLPClassifier(**config, random_state=random_state)
 
     return inner
 
 
 @app.command()
 def fit_model(
-    model: Annotated[model, typer.Option()],
+    model: Annotated[Model, typer.Option()] = "xgboost",
+    yaml_config: Annotated[Path, typer.Option()] = current_script_path
+    / "cfg"
+    / "baseline.yml",
     recreate_split: Annotated[bool, typer.Option()] = False,
     min_game_time: Annotated[int, typer.Option()] = 5,
     tmp_workspace: Annotated[Path, typer.Option()] = Path("./processed_data"),
@@ -123,7 +114,11 @@ def fit_model(
 
     results = []
     std_dev = []
-    _m = get_model(model)
+    assert yaml_config.exists()
+    with yaml_config.open(mode="r") as file:
+        yaml_data = yaml.safe_load(file)
+
+    _m = get_model(model, **yaml_data[model.name])
 
     for time_step, current_time in enumerate(time.arange()):
         print(f"Running current_time: {current_time}")
@@ -142,16 +137,17 @@ def fit_model(
         print("Starting fit...")
         t1 = timeit.default_timer()
 
-        xgb = _m(random_state)
+        model_ = _m(random_state)
 
-        xgb_scores = cross_val_score(xgb, X, y, cv=cv, n_jobs=-1)
+        model_scores = cross_val_score(model_, X, y, cv=cv, n_jobs=-1)
         t2 = timeit.default_timer()
-        results.append(xgb_scores.mean())
-        std_dev.append(xgb_scores.std())
+        results.append(model_scores.mean())
+        std_dev.append(model_scores.std())
         print(f"Took {t2 - t1}s")
         print(
-            "XGBoost: %0.4f accuracy with a standard deviation of %0.4f"
-            % (xgb_scores.mean(), xgb_scores.std())
+            f"{model.name}: "
+            f"{model_scores.mean():.4f} accuracy with a "
+            f"standard deviation of {model_scores.std():.4f}"
         )
 
     if save_plots:
@@ -166,13 +162,13 @@ def fit_model(
         )
 
         # Add labels and title
-        plt.xlabel("X Axis Label")
-        plt.ylabel("Y Axis Label")
-        plt.title("Line Plot with Standard Deviation")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Accuracry")
+        plt.title(f"Accuracy of {model.name}")
 
         # Add legend
         plt.legend()
-        plt.savefig("yeet.png")
+        plt.savefig(f"{model.name}.png")
 
 
 if __name__ == "__main__":
