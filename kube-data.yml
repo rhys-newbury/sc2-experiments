@@ -17,11 +17,9 @@ spec:
             - name: dkr-creds
           securityContext:
             runAsUser: 1000
-          nodeSelector:
-            nvidia.com/gpu.product: NVIDIA-GeForce-GTX-1080-Ti
           containers:
             - name: runner
-              image: mu00120825.eng.monash.edu.au:5021/sc2-experiments:latest
+              image: mu00120825.eng.monash.edu.au:5000/sc2-serializer:latest
               command:
                 [
                   ./sc2_converter,
@@ -33,27 +31,26 @@ spec:
                   --badfile=/mnt/storage/converted/4.9.2/badReplays/bad.txt,
                 ]
               env:
-                - name: DATAPATH
-                  value: /mnt/storage/converted/4.9.2/
+                - name: SC2PATH
+                  value: /mnt/storage/SC2/4.9.2/
+                - name: CUDA_VISIBLE_DEVICES
+                  value: "-1"
+                - name: POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
               resources:
                 requests:
-                  memory: 64Gi
-                  cpu: 8000m
-                  nvidia.com/gpu: 1 # 1 GPU
+                  memory: 3Gi
+                  cpu: 1000m
                 limits:
-                  memory: 100Gi
-                  cpu: 10000m
-                  nvidia.com/gpu: 1 # 1 GPU
+                  memory: 6Gi
+                  cpu: 2000m
               volumeMounts:
                 - name: storage
                   mountPath: /mnt/storage
-                - mountPath: /dev/shm
-                  name: dshm
           volumes:
             - name: storage
               nfs:
                 server: 130.194.128.238
                 path: /mnt/fast/more-users/bryce-rhys
-            - name: dshm
-              emptyDir:
-                medium: Memory
