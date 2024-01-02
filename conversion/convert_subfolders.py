@@ -2,6 +2,7 @@
 
 import concurrent.futures as fut
 import subprocess
+import io
 from multiprocessing import cpu_count
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,13 @@ def make_args(game: Path, replays: Path, converter: Path, output: Path, port: in
         f"--game={game}",
         f"--port={port}",
     ]
+
+
+def run_with_redirect(tid, *args):
+    """Redirect each thread stdout to log file"""
+    print(f"running {tid}: {args}")
+    with open(f"worker_logs_{tid}.txt", "a", encoding="utf-8") as f:
+        subprocess.run(args, stdout=io.TextIOWrapper(f.buffer, write_through=True))
 
 
 @app.command()
@@ -46,18 +54,9 @@ def main(
         for idx, folder in enumerate(replays.iterdir()):
             if folder.is_file():
                 continue
-            res.append(
-                ctx.submit(
-                    subprocess.run,
-                    make_args(
-                        game,
-                        folder,
-                        converter,
-                        outfolder / (folder.stem + ".SC2Replays"),
-                        9168 + idx,
-                    ),
-                )
-            )
+            outfile = outfolder / (folder.stem + ".SC2Replays")
+            args = make_args(game, folder, converter, outfile, 9168 + idx)
+            res.append(ctx.submit(run_with_redirect, idx, *args))
 
         fut.wait(res)
 

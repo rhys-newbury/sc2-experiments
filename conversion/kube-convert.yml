@@ -1,14 +1,14 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: sc2-convert
+  name: sc2-convert-0
 spec:
   maxRetry: 1
   minAvailable: 1
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 192
+    - replicas: 64
       name: serialize
       template:
         spec:
@@ -17,6 +17,8 @@ spec:
             - name: dkr-creds
           securityContext:
             runAsUser: 1000
+          nodeSelector:
+            kubernetes.io/hostname: r630-t4-vm
           containers:
             - name: runner
               image: mu00120825.eng.monash.edu.au:5000/sc2-serializer:latest
@@ -24,11 +26,12 @@ spec:
                 [
                   ./sc2_converter,
                   --replays=/mnt/storage/4.9.2/,
-                  --game=/mnt/storage/SC2/4.9.2-merged/Versions/Base74741/SC2_x64,
+                  --game=/mnt/storage/SC2/4.9.2-merged/Versions,
                   --converter=action,
                   --partition=/mnt/storage/492_partition/partition,
                   --output=/mnt/storage/converted/4.9.2/db,
                   --badfile=/mnt/storage/converted/4.9.2/badReplays/bad.txt,
+                  "--offset=192",
                 ]
               env:
                 - name: SC2PATH
