@@ -11,6 +11,14 @@ MLP:
   alpha: 0.0001
   hidden_layer_sizes:
   - 100
+  - 80
   learning_rate_init: 0.001
   max_iter: 1000
   solver: adam
+
+database: /mnt/storage/gamedata.db
+sql_filters: ["playerMMR > 0", "game_length > 6720", "read_success = 1"]
+timepoints:
+  min: 2
+  max: 30
+  step: 0.5

@@ -1,6 +1,7 @@
 from sklearn import preprocessing
 import numpy as np
-from src.data import SC2Replay, Split, TimeRange
+from src.data import SC2SQLReplay, Split, TimeRange
+from src.data.utils import gen_val_query
 import os
 from pathlib import Path
 from torch.utils.data import DataLoader
@@ -10,7 +11,6 @@ from sklearn.neural_network import MLPClassifier
 
 import xgboost
 import timeit
-import torch
 import matplotlib.pyplot as plt
 import typer
 from typing_extensions import Annotated
@@ -48,21 +48,27 @@ def fit_model(
     / "cfg"
     / "baseline.yml",
     recreate_split: Annotated[bool, typer.Option()] = False,
-    min_game_time: Annotated[int, typer.Option()] = 5,
     tmp_workspace: Annotated[Path, typer.Option()] = Path("./processed_data"),
     save_plots: Annotated[bool, typer.Option()] = True,
+    workers: Annotated[int, typer.Option()] = 8,
 ):
-    time = TimeRange(0, 15, 0.3)  # Minutes,
+    assert yaml_config.exists()
+    with yaml_config.open(mode="r") as file:
+        yaml_data = yaml.safe_load(file)
 
-    dataset = SC2Replay(
+    time = TimeRange(**yaml_data["timepoints"])
+
+    dataset = SC2SQLReplay(
         Path(os.environ["DATAPATH"]),
         Split.TRAIN,
         0.8,
         {"minimap_features", "scalar_features"},
         time,
-        min_game_time=min_game_time,
+        gen_val_query(yaml_data["database"], yaml_data["sql_filters"]),
+        yaml_data["database"],
     )
-    dataloader = DataLoader(dataset, batch_size=8, num_workers=8)
+
+    dataloader = DataLoader(dataset, batch_size=8, num_workers=workers)
 
     if recreate_split:
         for time_step, current_time in enumerate(time.arange()):
@@ -79,17 +85,11 @@ def fit_model(
             print(f"Took {timeit.default_timer() - t2}s")
             t2 = timeit.default_timer()
 
-            difference_array = np.absolute(time.arange() - min_game_time)
-
-            # find the index of minimum element from the array
-            five_minute_index = difference_array.argmin()
-            mask = sample["valid"].sum(axis=1) > five_minute_index
-
             for time_step, current_time in enumerate(time.arange()):
                 file = tmp_workspace / f"{time_step}_x.npy"
                 wins = tmp_workspace / f"{time_step}_y.npy"
 
-                mask_ = torch.logical_and(sample["valid"][:, time_step], mask)
+                mask_ = sample["valid"][:, time_step]
                 x = sample["scalar_features"][:, time_step, :][mask_, :]
                 y = sample["win"][mask_]
 
@@ -113,10 +113,6 @@ def fit_model(
 
     results = []
     std_dev = []
-    assert yaml_config.exists()
-    with yaml_config.open(mode="r") as file:
-        yaml_data = yaml.safe_load(file)
-
     _m = get_model(model, **yaml_data[model.name])
 
     for time_step, current_time in enumerate(time.arange()):
@@ -178,7 +174,6 @@ def fit_all(
     / "cfg"
     / "baseline.yml",
     recreate_split: Annotated[bool, typer.Option()] = False,
-    min_game_time: Annotated[int, typer.Option()] = 5,
     tmp_workspace: Annotated[Path, typer.Option()] = Path("./processed_npy_files"),
     save_plots: Annotated[bool, typer.Option()] = True,
 ):
@@ -188,7 +183,6 @@ def fit_all(
             model=m,
             yaml_config=yaml_config,
             recreate_split=recreate_split,
-            min_game_time=min_game_time,
             tmp_workspace=tmp_workspace,
             save_plots=False,
         )
@@ -196,7 +190,11 @@ def fit_all(
         recreate_split = False
 
     if save_plots:
-        time = TimeRange(0, 15, 0.3)  # Minutes,
+        assert yaml_config.exists()
+        with yaml_config.open(mode="r") as file:
+            yaml_data = yaml.safe_load(file)
+
+        time = TimeRange(**yaml_data["timepoints"])
 
         for name, (results, std_dev) in results.items():
             line_color = np.random.rand(

@@ -48,3 +48,5 @@ model:
           power: 0.9
 logger:
   interval: 50
+  # wandb:
+  #   project: starcraft-predict-outcome

@@ -8,7 +8,7 @@ import torch
 import typer
 import yaml
 from torch import Tensor
-from konductor.metadata.loggers import TBLogger, ParquetLogger, MultiWriter
+from konductor.metadata.loggers import TBLogger, ParquetLogger, MultiWriter, WandBLogger
 from konductor.init import ExperimentInitConfig, ModuleInitConfig
 from konductor.metadata import DataManager
 from konductor.trainer.pytorch import (
@@ -30,6 +30,9 @@ class Trainer(PyTorchTrainer):
             with torch.cuda.stream(stream):
                 data = {k: d.cuda(non_blocking=True) for k, d in data.items()}
             stream.synchronize()
+
+        if self.modules.trainloader.dataset.min_index is None:
+            return data
 
         mask = data["valid"].sum(axis=1) > self.modules.trainloader.dataset.min_index
 
@@ -67,6 +70,13 @@ def main(
 
     train_modules = PyTorchTrainerModules.from_config(exp_cfg)
 
+    wb_writer = []
+    if "wand" in exp_cfg.log_kwargs:
+        import wandb
+
+        wandb.init(**exp_cfg.log_kwargs.get("wandb", {}))
+        wb_writer = [WandBLogger()]
+
     data_manager = DataManager.default_build(
         exp_cfg,
         train_modules.get_checkpointables(),
@@ -74,7 +84,9 @@ def main(
             "win-auc": src.stats.WinAUC.from_config(exp_cfg),
             "binary-acc": src.stats.BinaryAcc.from_config(exp_cfg),
         },
-        MultiWriter([ParquetLogger(exp_cfg.work_dir), TBLogger(exp_cfg.work_dir)]),
+        MultiWriter(
+            [ParquetLogger(exp_cfg.work_dir), TBLogger(exp_cfg.work_dir)] + wb_writer
+        ),
     )
 
     if brief is not None:

@@ -1,5 +1,6 @@
-from typing import Sequence
-
+from typing import Sequence, List
+from pathlib import Path
+import sqlite3
 import torch
 from torch import Tensor
 
@@ -25,3 +26,20 @@ def find_closest_indicies(options: Sequence[int], targets: Sequence[int]):
             if tgt_idx == nearest.nelement():
                 break
     return nearest
+
+
+def gen_val_query(database: Path, sql_filters: List[str] | None):
+    sql_filter_string = (
+        ""
+        if sql_filters is None or len(sql_filters) == 0
+        else (" WHERE " + " AND ".join(sql_filters))
+    )
+    sql_query = "SELECT * FROM game_data" + sql_filter_string + ";"
+    assert sqlite3.complete_statement(sql_query), "Incomplete SQL Statement"
+    with sqlite3.connect(database) as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(sql_query)
+        except sqlite3.OperationalError as e:
+            raise AssertionError("Invalid SQL Syntax", e)
+    return sql_query
