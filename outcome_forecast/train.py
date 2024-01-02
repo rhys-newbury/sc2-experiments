@@ -8,7 +8,7 @@ import torch
 import typer
 import yaml
 from torch import Tensor
-from konductor.metadata.loggers import TBLogger, ParquetLogger, MultiWriter
+from konductor.metadata.loggers import TBLogger, ParquetLogger, MultiWriter, WandBLogger
 from konductor.init import ExperimentInitConfig, ModuleInitConfig
 from konductor.metadata import DataManager
 from konductor.trainer.pytorch import (
@@ -70,6 +70,11 @@ def main(
 
     train_modules = PyTorchTrainerModules.from_config(exp_cfg)
 
+    wb_writer = (
+        [WandBLogger(**exp_cfg.log_kwargs.get("wandb", {}))]
+        if "wandb" in exp_cfg.log_kwargs
+        else []
+    )
     data_manager = DataManager.default_build(
         exp_cfg,
         train_modules.get_checkpointables(),
@@ -77,7 +82,9 @@ def main(
             "win-auc": src.stats.WinAUC.from_config(exp_cfg),
             "binary-acc": src.stats.BinaryAcc.from_config(exp_cfg),
         },
-        MultiWriter([ParquetLogger(exp_cfg.work_dir), TBLogger(exp_cfg.work_dir)]),
+        MultiWriter(
+            [ParquetLogger(exp_cfg.work_dir), TBLogger(exp_cfg.work_dir)] + wb_writer
+        ),
     )
 
     if brief is not None:
