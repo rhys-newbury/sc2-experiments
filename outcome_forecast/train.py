@@ -70,11 +70,13 @@ def main(
 
     train_modules = PyTorchTrainerModules.from_config(exp_cfg)
 
-    wb_writer = (
-        [WandBLogger(**exp_cfg.log_kwargs.get("wandb", {}))]
-        if "wandb" in exp_cfg.log_kwargs
-        else []
-    )
+    wb_writer = []
+    if "wand" in exp_cfg.log_kwargs:
+        import wandb
+
+        wandb.init(**exp_cfg.log_kwargs.get("wandb", {}))
+        wb_writer = [WandBLogger()]
+
     data_manager = DataManager.default_build(
         exp_cfg,
         train_modules.get_checkpointables(),
