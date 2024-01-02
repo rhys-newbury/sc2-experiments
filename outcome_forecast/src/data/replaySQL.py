@@ -6,6 +6,7 @@ from konductor.data import DATASET_REGISTRY, Split
 
 import sqlite3
 from .baseDataset import SC2ReplayBase, TimeRange, SC2ReplayConfigBase
+from .utils import gen_val_query
 
 
 class SC2SQLReplay(SC2ReplayBase):
@@ -16,16 +17,13 @@ class SC2SQLReplay(SC2ReplayBase):
         train_ratio: float,
         features: set[str] | None,
         timepoints: TimeRange,
-        min_game_time: float,
         sql_query: str,
         database: Path,
     ) -> None:
         self.sql_query = sql_query
         self.database = database
 
-        super().__init__(
-            basepath, split, train_ratio, features, timepoints, min_game_time
-        )
+        super().__init__(basepath, split, train_ratio, features, timepoints)
 
         # Extract and print column names
         self.cursor.execute("PRAGMA table_info('game_data');")
@@ -68,17 +66,4 @@ class SC2ReplayConfig(SC2ReplayConfigBase):
 
     def __post_init__(self):
         super().__post_init__()
-
-        sql_filter_string = (
-            ""
-            if self.sql_filters is None or len(self.sql_filters) == 0
-            else (" " + " AND ".join(self.sql_filters))
-        )
-        self.sql_query = "SELECT * FROM game_data" + sql_filter_string + ";"
-        assert sqlite3.complete_statement(self.sql_query), "Incomplete SQL Statement"
-        with sqlite3.connect(self.database) as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute(self.sql_query)
-            except sqlite3.OperationalError as e:
-                raise AssertionError("Invalid SQL Syntax", e)
+        self.sql_query = gen_val_query(self.database, self.sql_filters)

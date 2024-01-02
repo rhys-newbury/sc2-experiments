@@ -31,6 +31,9 @@ class Trainer(PyTorchTrainer):
                 data = {k: d.cuda(non_blocking=True) for k, d in data.items()}
             stream.synchronize()
 
+        if self.modules.trainloader.dataset.min_index is None:
+            return data
+
         mask = data["valid"].sum(axis=1) > self.modules.trainloader.dataset.min_index
 
         return {k: d[mask, ...] for k, d in data.items()}
@@ -79,8 +82,6 @@ def main(
                 ParquetLogger(exp_cfg.work_dir),
                 TBLogger(
                     exp_cfg.work_dir,
-                    "wandb" in exp_cfg.log_kwargs,
-                    **exp_cfg.log_kwargs.get("wandb", {})
                 ),
             ]
         ),

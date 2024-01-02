@@ -163,3 +163,4 @@ workspace
 *.npy
 *.SC2Replays
 outcome_forecast/wandb/
+*.png

@@ -25,10 +25,11 @@ spec:
               command:
                 [
                   "python",
-                  "/app/outcome_forecast/train.py",
-                  "--workspace=/mnt/storage",
-                  "--config-file=/app/outcome_forecast/cfg/sql.yml",
-                  "--epoch=100",
+                  "/app/outcome_forecast/fit.py",
+                  "fit-model",
+                  "--recreate-split",
+                  "--save-plots",
+                  "--tmp-workspace=/mnt/storage/tmp",
                   "--workers=8",
                 ]
               env:

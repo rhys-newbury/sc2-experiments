@@ -1,14 +1,14 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: sc2-train2
+  name: sc2-train1
 spec:
   maxRetry: 1
   minAvailable: 1
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 1
+    - replicas: 192
       name: serialize
       template:
         spec:
@@ -17,32 +17,31 @@ spec:
             - name: dkr-creds
           securityContext:
             runAsUser: 1000
-          nodeSelector:
-            nvidia.com/gpu.product: NVIDIA-GeForce-GTX-1080-Ti
           containers:
             - name: runner
               image: mu00120825.eng.monash.edu.au:5021/sc2-experiments:latest
               command:
                 [
                   "python",
-                  "/app/outcome_forecast/train.py",
+                  "-u",
+                  "/code/sc2-serializer/scripts/gen_database.py",
                   "--workspace=/mnt/storage",
-                  "--config-file=/app/outcome_forecast/cfg/sql.yml",
-                  "--epoch=100",
-                  "--workers=8",
+                 "--workers=8",
                 ]
               env:
                 - name: DATAPATH
                   value: /mnt/storage/converted/4.9.2/
+                - name: POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
               resources:
                 requests:
                   memory: 64Gi
                   cpu: 8000m
-                  nvidia.com/gpu: 1 # 1 GPU
                 limits:
                   memory: 100Gi
                   cpu: 10000m
-                  nvidia.com/gpu: 1 # 1 GPU
               volumeMounts:
                 - name: storage
                   mountPath: /mnt/storage

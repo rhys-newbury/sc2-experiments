@@ -41,7 +41,7 @@ class SC2ReplayBase(Dataset):
         train_ratio: float,
         features: set[str] | None,
         timepoints: TimeRange,
-        min_game_time: float,
+        min_game_time: float | None = None,
     ) -> None:
         super().__init__()
         self.features = features
@@ -57,8 +57,12 @@ class SC2ReplayBase(Dataset):
 
         _loop_per_min = 22.4 * 60
         self._target_game_loops = (timepoints.arange() * _loop_per_min).to(torch.int)
-        difference_array = torch.absolute(timepoints.arange() - min_game_time)
-        self.min_index = difference_array.argmin()
+
+        if min_game_time is None:
+            self.min_index = None
+        else:
+            difference_array = torch.absolute(timepoints.arange() - min_game_time)
+            self.min_index = difference_array.argmin()
 
     @abstractmethod
     def load_files(self, basepath: Path):
