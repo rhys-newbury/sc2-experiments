@@ -9,7 +9,7 @@ RUN mkdir /code && cd /code && \
     git submodule update --init --recursive && \
     git submodule update --remote && \
     pip install . && \
-    pip install git+https://github.com/rhys-newbury/konductor wandb
+    pip install git+https://github.com/5had3z/konductor wandb
 
 RUN pip install scikit-learn xgboost matplotlib
 
