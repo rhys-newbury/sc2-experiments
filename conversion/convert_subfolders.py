@@ -57,7 +57,6 @@ def main(
             outfile = outfolder / (folder.stem + ".SC2Replays")
             args = make_args(game, folder, converter, outfile, 9168 + idx)
             res.append(ctx.submit(run_with_redirect, idx, *args))
-
         fut.wait(res)
 
 
