@@ -30,12 +30,14 @@ def run_stats(ctr: Container, logfile: Path):
     with open(logfile, "w", encoding="utf-8") as f:
         f.write("CPU[Core],MEM[MB]\n")
 
-    while ctr.status == "created":
-        stats = ctr.stats(stream=False)
+    stats = ctr.stats(stream=False)
+    while ctr.status != "exited":
         cpu = get_cpu_usage(stats)
         mem = get_memory_usage(stats)
         with open(logfile, "a", encoding="utf-8") as f:
             f.write(f"{cpu},{mem}\n")
+        stats = ctr.stats(stream=False)
+
     duration = time.time() - stime
 
     # Suffix the file with the time taken for conversion
