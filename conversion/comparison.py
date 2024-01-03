@@ -31,12 +31,14 @@ def run_stats(ctr: Container, logfile: Path):
         f.write("CPU[Core],MEM[MB]\n")
 
     stats = ctr.stats(stream=False)
+    ctr.reload()
     while ctr.status != "exited":
         cpu = get_cpu_usage(stats)
         mem = get_memory_usage(stats)
         with open(logfile, "a", encoding="utf-8") as f:
             f.write(f"{cpu},{mem}\n")
         stats = ctr.stats(stream=False)
+        ctr.reload()
 
     duration = time.time() - stime
 
@@ -77,7 +79,7 @@ def alphastar(results: Path = Path.cwd()):
             "python3",
             "data/generate_dataset.py",
             "--sc2_replay_path=/data/replays/4.9.2",
-            "--converted_path=/data/converted/4.9.2",
+            "--converted_path=/data/converted/tfrec",
             "--partition_file=/data/parts/4.9.2/evaluation_partition",
             "--converter_settings=configs/alphastar_supervised_converter_settings.pbtxt",
             "--num_threads=1",
