@@ -1,9 +1,11 @@
-from pathlib import Path
 import time
+from pathlib import Path
 
 import docker
+import pandas as pd
 import typer
 from docker.models.containers import Container
+from matplotlib import pyplot as plt
 
 
 def get_cpu_usage(stats) -> float:
@@ -67,7 +69,7 @@ def cpp_serializer(results: Path = Path.cwd()):
         volumes=[f"{SC2_PATH}:/data"],
         detach=True,
     )
-    run_stats(ctr, results / "sc2-serializer.txt")
+    run_stats(ctr, results / "sc2-serializer.csv")
 
 
 @app.command()
@@ -89,7 +91,25 @@ def alphastar(results: Path = Path.cwd()):
         volumes=[f"{SC2_PATH}:/data"],
         detach=True,
     )
-    run_stats(ctr, results / "alphastar.txt")
+    run_stats(ctr, results / "alphastar.csv")
+
+
+@app.command()
+def compare(results: Path = Path.cwd()):
+    cpp_stats = pd.read_csv(next(results.glob("sc2-serializer*.csv")))
+    astar_stats = pd.read_csv(next(results.glob("alphastar*.csv")))
+    for key in ["MEM[MB]", "CPU[Core]"]:
+        plt.plot(cpp_stats[key], label="sc2-serializer")
+        plt.plot(astar_stats[key], label="alphastar")
+        plt.suptitle(
+            f"sc2-serializer avg: {cpp_stats[key].mean():.2f}, max: {cpp_stats[key].max():.2f}"
+            f"\nalphastar avg: {astar_stats[key].mean():.2f}, max: {astar_stats[key].max():.2f}"
+        )
+        plt.legend()
+        plt.ylabel(key)
+        plt.xlabel("sample index")
+        plt.savefig(f"{key}.png")
+        plt.close()
 
 
 if __name__ == "__main__":
