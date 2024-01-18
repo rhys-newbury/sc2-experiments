@@ -1,15 +1,17 @@
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
 from konductor.data import DATASET_REGISTRY, Split
 
-import sqlite3
-from .baseDataset import SC2ReplayBase, TimeRange, SC2ReplayConfigBase
+from .baseDataset import SC2ReplayBase, SC2ReplayConfigBase, TimeRange
 from .utils import gen_val_query
 
 
 class SC2SQLReplay(SC2ReplayBase):
+    """Filter dataset sampling based on sql queries"""
+
     def __init__(
         self,
         basepath: Path,
@@ -19,11 +21,14 @@ class SC2SQLReplay(SC2ReplayBase):
         timepoints: TimeRange,
         sql_query: str,
         database: Path,
+        minimap_layers: list[str] | None = None,
     ) -> None:
         self.sql_query = sql_query
         self.database = database
 
-        super().__init__(basepath, split, train_ratio, features, timepoints)
+        super().__init__(
+            basepath, split, train_ratio, features, timepoints, minimap_layers
+        )
 
         # Extract and print column names
         self.cursor.execute("PRAGMA table_info('game_data');")
@@ -38,17 +43,18 @@ class SC2SQLReplay(SC2ReplayBase):
         self.cursor = self.conn.cursor()
         self.cursor.execute(self.sql_query.replace(" * ", " COUNT(*) "))
 
-        self.n_replays = self.cursor.fetchone()[0]
-        self.train_test_split()
+        self.init_split_params(self.cursor.fetchone()[0])
 
     def __getitem__(self, index: int):
-        squery = self.sql_query[:-1] + f" LIMIT 1 OFFSET {index};"
+        squery = self.sql_query[:-1] + f" LIMIT 1 OFFSET {self.start_idx + index};"
         self.cursor.execute(squery)
         result = self.cursor.fetchone()
 
-        return self.getitem(
+        self.load_to_parser(
             self.basepath / result[self.file_name_idx], result[self.idx_idx]
         )
+
+        return self.process_replay()
 
 
 @dataclass

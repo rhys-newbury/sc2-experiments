@@ -10,6 +10,8 @@ from .utils import upper_bound
 
 
 class SC2Replay(SC2ReplayBase):
+    """Run over all replays in folder of databases"""
+
     def load_files(self, basepath: Path):
         if basepath.is_file():
             self.replays = [basepath]
@@ -24,13 +26,13 @@ class SC2Replay(SC2ReplayBase):
             replays_per_file[idx] = self.db_handle.size()
 
         self._accumulated_replays = torch.cumsum(replays_per_file, 0)
-        self.n_replays = int(self._accumulated_replays[-1].item())
-        self.train_test_split()
+        self.init_split_params(int(self._accumulated_replays[-1].item()))
 
     def __getitem__(self, index: int):
-        file_index = upper_bound(self._accumulated_replays, index)
+        file_index = upper_bound(self._accumulated_replays, self.start_idx + index)
         db_index = index - int(self._accumulated_replays[file_index].item())
-        return self.getitem(self.replays[file_index], db_index)
+        self.load_to_parser(self.replays[file_index], db_index)
+        return self.process_replay()
 
 
 @dataclass
