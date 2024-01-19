@@ -152,11 +152,8 @@ class SC2ReplayConfig(DatasetConfig):
         ret.update(self.__dict__)
         return ret
 
-    def _known_unused(self):
-        return {"train_loader", "val_loader", "basepath"}
-
     def get_dataloader(self, split: Split) -> Any:
-        known_unused = self._known_unused()
+        known_unused = {"train_loader", "val_loader", "basepath"}
         sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](
             split=split,
             train_ratio=self.train_ratio,

@@ -1,4 +1,5 @@
 import abc
+import os
 import sqlite3
 from pathlib import Path
 
@@ -99,7 +100,7 @@ class SQLSampler(ReplaySampler):
 
     def __init__(
         self,
-        database: Path,
+        database: str,
         replays_path: Path,
         filter_query: str | list[str],
         train_ratio: float,
@@ -108,7 +109,7 @@ class SQLSampler(ReplaySampler):
         """Filter sampled replays from a folder of replays
 
         Args:
-            database (Path): Path to sqlite3 database with replay info
+            database (str): Path to sqlite3 database with replay info, prefix '$ENV:' will be prefixed with DATAPATH
             replays_folder (Path): Path to folder of .SC2Replays file(s)
             filter_query (str): SQL query to filter sampled replays
             train_ratio (float): Proportion of all data used for training
@@ -119,9 +120,15 @@ class SQLSampler(ReplaySampler):
             AssertionError: no .SC2Replay files found in folder
         """
         super().__init__(train_ratio, split)
-        self.database = sqlite3.connect(database)
+        if database.startswith("$ENV:"):
+            database_pth = Path(
+                os.environ.get("DATAPATH", "/data")
+            ) / database.removeprefix("$ENV:")
+        else:
+            database_pth = Path(database)
+        self.database = sqlite3.connect(database_pth)
         if isinstance(filter_query, list):
-            filter_query = gen_val_query(database, filter_query)
+            filter_query = gen_val_query(database_pth, filter_query)
         self.filter_query = filter_query
         assert replays_path.exists(), f"replays_path not found: {replays_path}"
         self.replays_folder = replays_path

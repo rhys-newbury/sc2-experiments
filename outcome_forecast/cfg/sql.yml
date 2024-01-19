@@ -11,7 +11,7 @@ dataset:
       sampler_cfg:
         type: sql
         args:
-          database: /mnt/storage/gamedata.db
+          database: $ENV:gamedata.db
           filter_query:
             ["game_length > 6720", "read_success = 1", "parse_success = 1"]
     val_loader:
