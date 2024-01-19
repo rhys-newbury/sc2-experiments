@@ -8,14 +8,22 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import KFold
 from sklearn.neural_network import MLPClassifier
+from sklearn import svm
+from sklearn.linear_model import LogisticRegression
 
-import xgboost
 import timeit
 import matplotlib.pyplot as plt
 import typer
 from typing_extensions import Annotated
+from typing import List
 from enum import Enum
 import yaml
+
+try:
+    import xgboost
+except ImportError:
+    xgboost = None
+
 
 app = typer.Typer()
 
@@ -24,6 +32,8 @@ current_script_path = Path(__file__).resolve().parent
 
 class Model(Enum):
     XGBOOST = "xgboost"
+    SVM = "svm"
+    LOGISTIC_REGRESSION = "logistic_regression"
     MLP = "mlp"
 
 
@@ -31,19 +41,25 @@ def get_model(m: Model, **config):
     def inner(random_state: int):
         match m:
             case Model.XGBOOST:
+                if xgboost is None:
+                    raise ImportError("Cannot Use XGBoost, as it is not installed :(")
                 return xgboost.XGBClassifier(
                     **config,
                     random_state=random_state,
                 )
             case Model.MLP:
                 return MLPClassifier(**config, random_state=random_state)
+            case Model.SVM:
+                return svm.SVC(**config, random_state=random_state)
+            case Model.LOGISTIC_REGRESSION:
+                return LogisticRegression(**config, random_state=random_state)
 
     return inner
 
 
 @app.command()
 def fit_model(
-    model: Annotated[Model, typer.Option()] = "xgboost",
+    model: Annotated[Model, typer.Option()] = Model.XGBOOST,
     yaml_config: Annotated[Path, typer.Option()] = current_script_path
     / "cfg"
     / "baseline.yml",
@@ -163,7 +179,7 @@ def fit_model(
 
         # Add legend
         plt.legend()
-        plt.savefig(f"{model.name}.png")
+        plt.savefig(f"{tmp_workspace}/{model.name}.png")
 
     return results, std_dev
 
@@ -176,18 +192,27 @@ def fit_all(
     recreate_split: Annotated[bool, typer.Option()] = False,
     tmp_workspace: Annotated[Path, typer.Option()] = Path("./processed_npy_files"),
     save_plots: Annotated[bool, typer.Option()] = True,
+    skip: Annotated[List[str] | None, typer.Option()] = None,
+    workers: Annotated[int, typer.Option()] = 8,
 ):
     results = {}
     for m in Model:
-        results[m.name] = fit_model(
-            model=m,
-            yaml_config=yaml_config,
-            recreate_split=recreate_split,
-            tmp_workspace=tmp_workspace,
-            save_plots=False,
-        )
+        try:
+            if skip is not None and m.name in skip:
+                continue
+            results[m.name] = fit_model(
+                model=m,
+                yaml_config=yaml_config,
+                recreate_split=recreate_split,
+                tmp_workspace=tmp_workspace,
+                save_plots=False,
+                workers=workers,
+            )
 
-        recreate_split = False
+            recreate_split = False
+        except ImportError as e:
+            print(e)
+            continue
 
     if save_plots:
         assert yaml_config.exists()
@@ -221,7 +246,7 @@ def fit_all(
         # Add legend
         plt.legend()
 
-        plt.savefig("all.png")
+        plt.savefig(f"{tmp_workspace}/all.png")
 
 
 if __name__ == "__main__":

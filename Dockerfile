@@ -11,7 +11,7 @@ RUN mkdir /code && cd /code && \
     pip install . && \
     pip install git+https://github.com/5had3z/konductor wandb
 
-RUN pip install scikit-learn xgboost matplotlib
+RUN pip install scikit-learn xgboost matplotlib sc2reader
 
 WORKDIR /app
 COPY . .
