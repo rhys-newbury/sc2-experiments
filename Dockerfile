@@ -1,6 +1,7 @@
 FROM nvcr.io/nvidia/pytorch:23.08-py3
 
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y libboost-iostreams1.74-dev
+RUN echo "hello"
 
 RUN mkdir /code && cd /code && \
     pip install --upgrade pip && \
@@ -11,7 +12,7 @@ RUN mkdir /code && cd /code && \
     pip install . && \
     pip install git+https://github.com/5had3z/konductor wandb
 
-RUN pip install scikit-learn xgboost matplotlib
+RUN pip install scikit-learn xgboost matplotlib sc2reader
 
 WORKDIR /app
 COPY . .

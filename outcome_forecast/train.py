@@ -110,7 +110,7 @@ if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")
     logging.basicConfig(
         format=(
-            "%(asctime)s-RANK:{comm.get_local_rank()}-"
+            f"%(asctime)s-RANK:{comm.get_local_rank()}-"
             "%(levelname)s-%(name)s: %(message)s"
         ),
         level=logging.INFO,
