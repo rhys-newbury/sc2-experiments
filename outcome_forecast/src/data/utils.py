@@ -29,6 +29,7 @@ def find_closest_indicies(options: Sequence[int], targets: Sequence[int]):
 
 
 def gen_val_query(database: Path, sql_filters: List[str] | None):
+    """Transform list of sql filters to valid query and test that it works"""
     sql_filter_string = (
         ""
         if sql_filters is None or len(sql_filters) == 0

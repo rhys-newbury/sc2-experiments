@@ -1,5 +1,5 @@
 dataset:
-  - type: sc2-sql-replay
+  - type: sc2-replay-outcome
     args:
       features:
         - minimap_features
@@ -8,8 +8,12 @@ dataset:
         min: 2
         max: 30
         step: 0.5
-      database: /mnt/storage/gamedata.db
-      sql_filters: ["playerMMR > 0", "game_length > 6720", "read_success = 1"]
+      sampler_cfg:
+        type: sql
+        args:
+          database: /mnt/storage/gamedata.db
+          filter_query:
+            ["game_length > 6720", "read_success = 1", "parse_success = 1"]
     val_loader:
       type: PYTORCH_V1
       args:

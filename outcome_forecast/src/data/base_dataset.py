@@ -1,16 +1,21 @@
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 import torch
-from konductor.data import DatasetConfig, ExperimentInitConfig, Split
+from konductor.data import (
+    DATASET_REGISTRY,
+    DatasetConfig,
+    ExperimentInitConfig,
+    ModuleInitConfig,
+    Split,
+)
 from konductor.data._pytorch.dataloader import DataloaderV1Config
-from sc2_replay_reader import get_database_and_parser, Result
+from sc2_replay_reader import Result, get_database_and_parser
 from torch.utils.data import Dataset
 
+from .replay_sampler import SAMPLER_REGISTRY, ReplaySampler
 from .utils import find_closest_indicies
-from abc import abstractmethod
 
 
 @dataclass
@@ -26,18 +31,17 @@ class TimeRange:
         return torch.arange(self.min, self.max, self.step)
 
 
-class SC2ReplayBase(Dataset):
+class SC2ReplayOutcome(Dataset):
     def __init__(
         self,
-        basepath: Path,
-        split: Split,
-        train_ratio: float,
-        features: set[str] | None,
+        sampler: ReplaySampler,
         timepoints: TimeRange,
+        features: set[str] | None,
         minimap_layers: list[str] | None = None,
         min_game_time: float | None = None,
     ) -> None:
         super().__init__()
+        self.sampler = sampler
         self.features = features
         if self.features is None or "unit_features" in self.features:
             self.db_handle, self.parser = get_database_and_parser(
@@ -55,14 +59,6 @@ class SC2ReplayBase(Dataset):
         if minimap_layers is not None:
             self.parser.setMinimapFeatures(minimap_layers)
 
-        self.basepath = basepath
-        self.split = split
-        self.train_ratio = train_ratio
-        self.n_replays = 0
-        self.start_idx = 0
-
-        self.load_files(basepath)
-
         _loop_per_min = 22.4 * 60
         self._target_game_loops = (timepoints.arange() * _loop_per_min).to(torch.int)
 
@@ -72,32 +68,8 @@ class SC2ReplayBase(Dataset):
             difference_array = torch.absolute(timepoints.arange() - min_game_time)
             self.min_index = difference_array.argmin()
 
-    @abstractmethod
-    def load_files(self, basepath: Path):
-        pass
-
     def __len__(self) -> int:
-        assert hasattr(self, "n_replays"), "n_replays must be set before this"
-        return self.n_replays
-
-    def init_split_params(self, len_full_dataset: int):
-        """Set n_replays and start_idx based on train or test|val"""
-        assert hasattr(self, "n_replays"), "n_replays must be set before this"
-        train_size = int(len_full_dataset * self.train_ratio)
-
-        if self.split is not Split.TRAIN:
-            self.start_idx = train_size
-            self.n_replays = len_full_dataset - train_size
-        else:
-            self.start_idx = 0
-            self.n_replays = train_size
-
-        assert self.n_replays > 0, "No replays in dataset"
-
-    def load_to_parser(self, path: Path, index: int):
-        """Load replay data from database to parser"""
-        self.db_handle.open(path)
-        self.parser.parse_replay(self.db_handle.getEntry(index))
+        return len(self.sampler)
 
     def process_replay(self):
         """Process replay data currently in parser into dictonary of features and game outcome"""
@@ -129,13 +101,23 @@ class SC2ReplayBase(Dataset):
 
         return outputs
 
+    def __getitem__(self, index: int):
+        replay_file, replay_idx = self.sampler.sample(index)
+        self.db_handle.open(replay_file)
+        replay_data = self.db_handle.getEntry(replay_idx)
+        self.parser.parse_replay(replay_data)
+        outputs = self.process_replay()
+        return outputs
+
 
 @dataclass
-class SC2ReplayConfigBase(DatasetConfig):
+@DATASET_REGISTRY.register_module("sc2-replay-outcome")
+class SC2ReplayConfig(DatasetConfig):
     # Dataloader type we want to use
     train_loader: DataloaderV1Config
     val_loader: DataloaderV1Config
 
+    sampler_cfg: ModuleInitConfig
     features: set[str] | None = None
     minimap_layers: list[str] | None = field(
         default_factory=lambda: ["player_relative", "visibility", "creep"]
@@ -155,6 +137,8 @@ class SC2ReplayConfigBase(DatasetConfig):
             self.features = set(self.features)
         if isinstance(self.timepoints, dict):
             self.timepoints = TimeRange(**self.timepoints)
+        if not isinstance(self.sampler_cfg, ModuleInitConfig):
+            self.sampler_cfg = ModuleInitConfig(**self.sampler_cfg)
 
     @property
     def properties(self) -> Dict[str, Any]:
@@ -169,16 +153,18 @@ class SC2ReplayConfigBase(DatasetConfig):
         return ret
 
     def _known_unused(self):
-        return {"train_loader", "val_loader", "basepath", "sql_filters"}
-
-    @abstractmethod
-    def get_class(self):
-        pass
+        return {"train_loader", "val_loader", "basepath"}
 
     def get_dataloader(self, split: Split) -> Any:
         known_unused = self._known_unused()
+        sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](
+            split=split,
+            train_ratio=self.train_ratio,
+            replays_path=self.basepath,
+            **self.sampler_cfg.args,
+        )
         dataset = self.init_auto_filter(
-            self.get_class(), known_unused=known_unused, split=split
+            SC2ReplayOutcome, known_unused=known_unused, sampler=sampler
         )
         match split:
             case Split.TRAIN:
