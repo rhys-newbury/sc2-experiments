@@ -73,7 +73,11 @@ class SC2ReplayOutcome(Dataset):
 
     def process_replay(self):
         """Process replay data currently in parser into dictonary of features and game outcome"""
-        outputs_list = self.parser.sample(0)
+        try:
+            outputs_list = self.parser.sample(0)
+        except (RuntimeError, IndexError) as err:
+            raise RuntimeError(f"Parse failure for {self.parser.info}") from err
+
         if self.features is not None:
             outputs_list = {k: [outputs_list[k]] for k in self.features}
         else:
