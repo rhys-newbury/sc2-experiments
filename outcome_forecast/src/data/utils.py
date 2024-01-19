@@ -41,5 +41,5 @@ def gen_val_query(database: Path, sql_filters: List[str] | None):
         try:
             cursor.execute(sql_query)
         except sqlite3.OperationalError as e:
-            raise AssertionError("Invalid SQL Syntax", e)
+            raise AssertionError("Invalid SQL Syntax") from e
     return sql_query

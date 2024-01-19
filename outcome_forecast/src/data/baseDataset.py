@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
 
@@ -6,14 +6,7 @@ import numpy as np
 import torch
 from konductor.data import DatasetConfig, ExperimentInitConfig, Split
 from konductor.data._pytorch.dataloader import DataloaderV1Config
-from sc2_replay_reader import (
-    GAME_INFO_FILE,
-    ReplayDatabase,
-    ReplayParser,
-    Result,
-    setReplayDBLoggingLevel,
-    spdlog_lvl,
-)
+from sc2_replay_reader import get_database_and_parser, Result
 from torch.utils.data import Dataset
 
 from .utils import find_closest_indicies
@@ -41,17 +34,32 @@ class SC2ReplayBase(Dataset):
         train_ratio: float,
         features: set[str] | None,
         timepoints: TimeRange,
+        minimap_layers: list[str] | None = None,
         min_game_time: float | None = None,
     ) -> None:
         super().__init__()
         self.features = features
-        self.db_handle = ReplayDatabase()
-        self.parser = ReplayParser(GAME_INFO_FILE)
+        if self.features is None or "unit_features" in self.features:
+            self.db_handle, self.parser = get_database_and_parser(
+                parse_units=True, parse_minimaps=True
+            )
+        elif "minimap_features" in self.features:
+            self.db_handle, self.parser = get_database_and_parser(
+                parse_units=False, parse_minimaps=True
+            )
+        else:
+            self.db_handle, self.parser = get_database_and_parser(
+                parse_units=False, parse_minimaps=False
+            )
+
+        if minimap_layers is not None:
+            self.parser.setMinimapFeatures(minimap_layers)
+
         self.basepath = basepath
         self.split = split
         self.train_ratio = train_ratio
-
-        setReplayDBLoggingLevel(spdlog_lvl.warn)
+        self.n_replays = 0
+        self.start_idx = 0
 
         self.load_files(basepath)
 
@@ -72,22 +80,27 @@ class SC2ReplayBase(Dataset):
         assert hasattr(self, "n_replays"), "n_replays must be set before this"
         return self.n_replays
 
-    def train_test_split(self):
+    def init_split_params(self, len_full_dataset: int):
+        """Set n_replays and start_idx based on train or test|val"""
         assert hasattr(self, "n_replays"), "n_replays must be set before this"
-        self.n_replays *= (
-            self.train_ratio if self.split is Split.TRAIN else 1 - self.train_ratio
-        )
-        self.n_replays = int(self.n_replays)
+        train_size = int(len_full_dataset * self.train_ratio)
+
+        if self.split is not Split.TRAIN:
+            self.start_idx = train_size
+            self.n_replays = len_full_dataset - train_size
+        else:
+            self.start_idx = 0
+            self.n_replays = train_size
+
         assert self.n_replays > 0, "No replays in dataset"
 
-    def getitem(self, file_name: Path, db_index: int):
-        self.db_handle.open(file_name)
-        assert (  # This should hold if calculation checks out
-            db_index < self.db_handle.size()
-        ), f"{db_index} exceeds {self.db_handle.size()}"
+    def load_to_parser(self, path: Path, index: int):
+        """Load replay data from database to parser"""
+        self.db_handle.open(path)
+        self.parser.parse_replay(self.db_handle.getEntry(index))
 
-        self.parser.parse_replay(self.db_handle.getEntry(db_index))
-
+    def process_replay(self):
+        """Process replay data currently in parser into dictonary of features and game outcome"""
         outputs_list = self.parser.sample(0)
         if self.features is not None:
             outputs_list = {k: [outputs_list[k]] for k in self.features}
@@ -107,7 +120,7 @@ class SC2ReplayBase(Dataset):
 
         outputs = {
             "win": torch.as_tensor(
-                self.parser.data.playerResult == Result.Win, dtype=torch.float32
+                self.parser.info.playerResult == Result.Win, dtype=torch.float32
             ),
             "valid": torch.cat([torch.tensor([True]), sample_indicies != -1]),
         }
@@ -124,6 +137,9 @@ class SC2ReplayConfigBase(DatasetConfig):
     val_loader: DataloaderV1Config
 
     features: set[str] | None = None
+    minimap_layers: list[str] | None = field(
+        default_factory=lambda: ["player_relative", "visibility", "creep"]
+    )
     train_ratio: float = 0.8  # Portion of all data to use for training
     timepoints: TimeRange = TimeRange(0, 30, 2)  # Minutes
     min_game_time: float = 5.0  # Minutes
@@ -142,7 +158,13 @@ class SC2ReplayConfigBase(DatasetConfig):
 
     @property
     def properties(self) -> Dict[str, Any]:
-        ret = {"image_ch": 10, "scalar_ch": 28}
+        if self.minimap_layers is not None:
+            image_ch = len(self.minimap_layers)
+            if "player_relative" in self.minimap_layers:
+                image_ch += 3
+        else:
+            image_ch = 10
+        ret = {"image_ch": image_ch, "scalar_ch": 28}
         ret.update(self.__dict__)
         return ret
 

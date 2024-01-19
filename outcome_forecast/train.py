@@ -7,10 +7,9 @@ import src
 import torch
 import typer
 import yaml
-from torch import Tensor
-from konductor.metadata.loggers import TBLogger, ParquetLogger, MultiWriter, WandBLogger
 from konductor.init import ExperimentInitConfig, ModuleInitConfig
 from konductor.metadata import DataManager
+from konductor.metadata.loggers import MultiWriter, ParquetLogger, TBLogger, WandBLogger
 from konductor.trainer.pytorch import (
     PyTorchTrainer,
     PyTorchTrainerConfig,
@@ -18,6 +17,8 @@ from konductor.trainer.pytorch import (
 )
 from konductor.utilities import comm
 from konductor.utilities.pbar import PbarType, pbar_wrapper
+from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
+from torch import Tensor
 from typing_extensions import Annotated
 
 
@@ -105,6 +106,7 @@ def main(
 
 
 if __name__ == "__main__":
+    set_replay_database_logger_level(spdlog_lvl.warn)
     if torch.cuda.is_available():
         comm.initialize()
     torch.set_float32_matmul_precision("high")

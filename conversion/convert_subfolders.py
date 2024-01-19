@@ -5,7 +5,6 @@ import subprocess
 import io
 from multiprocessing import cpu_count
 from pathlib import Path
-from typing import Optional
 
 import typer
 from typing_extensions import Annotated
@@ -38,15 +37,14 @@ def main(
     replays: Annotated[Path, typer.Option()],
     game: Annotated[Path, typer.Option()],
     n_parallel: Annotated[int, typer.Option()] = cpu_count() // 2,
-    extra_args: Annotated[Optional[list[str]], typer.Option()] = None,
 ):
     """"""
     assert converter.exists()
     assert game.exists()
     assert replays.exists()
     assert (
-        0 < n_parallel <= 2 * cpu_count()
-    ), f"{n_parallel=}, does not satisfy 0 < n_parallel < 2 * cpu_count()"
+        0 < n_parallel <= cpu_count()
+    ), f"{n_parallel=}, does not satisfy 0 < n_parallel < cpu_count()"
     outfolder.mkdir(exist_ok=True)
 
     with fut.ProcessPoolExecutor(max_workers=n_parallel) as ctx:
@@ -57,7 +55,6 @@ def main(
             outfile = outfolder / (folder.stem + ".SC2Replays")
             args = make_args(game, folder, converter, outfile, 9168 + idx)
             res.append(ctx.submit(run_with_redirect, idx, *args))
-
         fut.wait(res)
 
 
