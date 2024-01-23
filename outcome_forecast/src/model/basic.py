@@ -86,42 +86,31 @@ class SequencePredictor(nn.Module):
     """
 
     def __init__(
-        self,
-        image_enc: nn.Module,
-        scalar_enc: nn.Module,
-        decoder: nn.Module,
-        window_size: int,
-        non_overlapping: bool,
+        self, image_enc: nn.Module, scalar_enc: nn.Module, decoder: nn.Module
     ) -> None:
         super().__init__()
         self.image_enc = image_enc
         self.scalar_enc = scalar_enc
         self.decoder = decoder
-        self.window_size = window_size
-        self.non_overlapping = non_overlapping
 
     def forward(self, step_data: dict[str, Tensor]) -> Tensor:
         """"""
-        n_timestep = step_data["scalar_features"].shape[1]
+        batch_sz, n_timestep = step_data["scalar_features"].shape[:2]
         # Merge batch and time dimension for minimaps
         image_feats = self.image_enc(step_data["minimap_features"].flatten(0, 1))
+        image_feats = image_feats.reshape(batch_sz, n_timestep, -1)
 
         # Process scalar features per timestep
         scalar_feats = []
         for tidx in range(n_timestep):
             scalar_feats.append(self.scalar_enc(step_data["scalar_features"][:, tidx]))
         # Make same shape as image feats
-        scalar_feats = torch.stack(scalar_feats, dim=1).flatten(0, 1)
+        scalar_feats = torch.stack(scalar_feats, dim=1)
 
         # Stack image and scalar features, decode, then reshape to [B, T, 1]
         all_feats = torch.cat([image_feats, scalar_feats], dim=-1)
 
-        step = self.window_size if self.training and self.non_overlapping else 1
-
-        result = []
-        for tidx in range(0, n_timestep, step):
-            result.append(self.decoder(all_feats[tidx : tidx + self.window_size]))
-        return torch.stack(result, dim=1)
+        return self.decoder(all_feats)
 
 
 @dataclass
@@ -129,19 +118,10 @@ class SequencePredictor(nn.Module):
 class SequenceConfig(BaseConfig):
     """Basic snapshot model configuration"""
 
-    window_size: int = field(kw_only=True)  # Size of sequence window
-    non_overlapping: bool = True  # Don't overlap sequence windows during training
-
     def get_instance(self, *args, **kwargs) -> Any:
         image_enc = MODEL_REGISTRY[self.image_enc.type](**self.image_enc.args)
         scalar_enc = MODEL_REGISTRY[self.scalar_enc.type](**self.scalar_enc.args)
         decoder = MODEL_REGISTRY[self.decoder.type](
-            in_ch=image_enc.out_ch + scalar_enc.out_ch,
-            window_size=self.window_size,
-            **self.decoder.args
+            in_ch=image_enc.out_ch + scalar_enc.out_ch, **self.decoder.args
         )
-        return self._apply_extra(
-            SequencePredictor(
-                image_enc, scalar_enc, decoder, self.window_size, self.non_overlapping
-            )
-        )
+        return self._apply_extra(SequencePredictor(image_enc, scalar_enc, decoder))
