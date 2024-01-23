@@ -126,6 +126,7 @@ class SQLSampler(ReplaySampler):
             ) / database.removeprefix("$ENV:")
         else:
             database_pth = Path(database)
+        assert database_pth.is_file(), f"Missing db {database_pth}"
         self.database = sqlite3.connect(database_pth)
         if isinstance(filter_query, list):
             filter_query = gen_val_query(database_pth, filter_query)

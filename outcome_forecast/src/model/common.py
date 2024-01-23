@@ -1,7 +1,12 @@
+import enum
+from copy import deepcopy
 from typing import Literal
 
+import torch
 from konductor.models import MODEL_REGISTRY
 from torch import nn, Tensor
+
+from ..utils import TimeRange
 
 
 @MODEL_REGISTRY.register_module("image-v1")
@@ -63,6 +68,33 @@ class ImageEncV1(nn.Module):
         return x
 
 
+def make_basic_encoder(
+    in_ch: int,
+    hidden_ch: int,
+    out_ch: int,
+    n_layers: int,
+    norm: type[nn.Module] = nn.LayerNorm,
+    activation: type[nn.Module] = nn.LeakyReLU,
+):
+    """
+    Create basic linear encoder with linear->norm->activation loop
+    """
+    encoder = [nn.Linear(in_ch, hidden_ch), norm(hidden_ch), activation()]
+
+    for idx in range(1, n_layers):
+        _hidden_ch = hidden_ch if idx == 1 else hidden_ch * 2
+        encoder.extend(
+            [
+                nn.Linear(_hidden_ch, 2 * hidden_ch),
+                norm(2 * hidden_ch),
+                activation(),
+            ]
+        )
+    encoder.append(nn.Linear(2 * hidden_ch, out_ch))
+
+    return nn.Sequential(*encoder)
+
+
 @MODEL_REGISTRY.register_module("scalar-v1")
 class ScalarEncoderV1(nn.Module):
     """Simple set of linear layers to encode feature vector"""
@@ -71,19 +103,7 @@ class ScalarEncoderV1(nn.Module):
         self, in_ch: int, hidden_ch: int = 32, out_ch: int = 32, n_layers: int = 2
     ) -> None:
         super().__init__()
-        self.encoder = nn.ModuleList(
-            [nn.Linear(in_ch, hidden_ch), nn.LayerNorm(hidden_ch), nn.LeakyReLU()]
-        )
-        for idx in range(1, n_layers):
-            _hidden_ch = hidden_ch if idx == 1 else hidden_ch * 2
-            self.encoder.extend(
-                [
-                    nn.Linear(_hidden_ch, 2 * hidden_ch),
-                    nn.GroupNorm(4, 2 * hidden_ch),
-                    nn.LeakyReLU(),
-                ]
-            )
-        self.encoder.append(nn.Linear(2 * hidden_ch, out_ch))
+        self.encoder = make_basic_encoder(in_ch, hidden_ch, out_ch, n_layers)
         self._out_ch = out_ch
 
     @property
@@ -91,6 +111,81 @@ class ScalarEncoderV1(nn.Module):
         return self._out_ch
 
     def forward(self, x: Tensor) -> Tensor:
-        for mod in self.encoder:
-            x = mod(x)
-        return x
+        return self.encoder(x)
+
+
+@MODEL_REGISTRY.register_module("scalar-v2")
+class ScalarEncoderV2(nn.Module):
+    """
+    Encoder that tests the game step and either normalizes in a particular range or selects a set of parameters.
+    Assuming from sc2_serializer/include/replay_parsing.hpp that gameStep is the last scalar feature.
+    """
+
+    class Strategy(enum.Enum):
+        """
+        Strategy for normalising scalar data
+        batch_norm - different input batch norm layer per timestep
+        weights - different set of weights per timestep
+        both - use both stratergies
+        """
+
+        batch_norm = enum.auto()
+        weights = enum.auto()
+        both = enum.auto()
+
+    def __init__(
+        self,
+        in_ch: int,
+        strategy: str | Strategy,
+        timerange: TimeRange,
+        time_idx: int = -1,
+        hidden_ch: int = 32,
+        out_ch: int = 32,
+        n_layers: int = 2,
+    ) -> None:
+        super().__init__()
+        if isinstance(strategy, str):
+            strategy = ScalarEncoderV2.Strategy[strategy]
+        in_ch -= 1  # We are not processing the gameStep feature
+        self.timerange: Tensor
+        self.register_buffer("timerange", timerange.arange(), persistent=False)
+        self.time_idx = time_idx
+        self.batch_norms = nn.ModuleList([nn.BatchNorm1d(in_ch)])
+        self.encoders = nn.ModuleList(
+            [make_basic_encoder(in_ch, hidden_ch, out_ch, n_layers)]
+        )
+        self.strategy = strategy
+        self._out_ch = out_ch
+
+        # Check to duplicate batch norm
+        if strategy in {
+            ScalarEncoderV2.Strategy.batch_norm,
+            ScalarEncoderV2.Strategy.both,
+        }:
+            for _ in range(1, len(self.timerange)):
+                self.batch_norms.append(deepcopy(self.batch_norms[0]))
+
+        # Check to duplicate params
+        if strategy in {
+            ScalarEncoderV2.Strategy.weights,
+            ScalarEncoderV2.Strategy.both,
+        }:
+            for _ in range(1, len(self.timerange)):
+                self.encoders.append(deepcopy(self.encoders[0]))
+
+    @property
+    def out_ch(self):
+        return self._out_ch
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        """Inputs are assumed to all be of the same timestep which is the gameStep"""
+        timestep = inputs[0, -1] / (22.4 * 60)
+        mod_idx = int(torch.argmin((timestep - self.timerange).abs()))
+
+        norm_idx = mod_idx if len(self.batch_norms) > 1 else 0
+        norm_feats = self.batch_norms[norm_idx](inputs[..., :-1])
+
+        params_idx = mod_idx if len(self.encoders) > 1 else 0
+        feats = self.encoders[params_idx](norm_feats)
+
+        return feats

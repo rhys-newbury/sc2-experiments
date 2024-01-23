@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -9,28 +9,8 @@ from konductor.models import MODEL_REGISTRY, ExperimentInitConfig
 from konductor.models._pytorch import TorchModelConfig
 
 
-class BasicPredictor(nn.Module):
-    """Make basic prediction of game outcome based on current observation"""
-
-    def __init__(
-        self, image_enc: nn.Module, scalar_enc: nn.Module, decoder: nn.Module
-    ) -> None:
-        super().__init__()
-        self.image_enc = image_enc
-        self.scalar_enc = scalar_enc
-        self.decoder = decoder
-
-    def forward(self, step_data: dict[str, Tensor]) -> Tensor:
-        image_feats = self.image_enc(step_data["minimap_features"].flatten(0, 1))
-        scalar_feats = self.scalar_enc(step_data["scalar_features"].flatten(0, 1))
-        all_feats = torch.cat([image_feats, scalar_feats], dim=-1)
-        result = self.decoder(all_feats).reshape(step_data["win"].shape[0], -1)
-        return result
-
-
 @dataclass
-@MODEL_REGISTRY.register_module("win-pred-basic")
-class BasicPredictorConfig(TorchModelConfig):
+class BaseConfig(TorchModelConfig):
     image_enc: ModuleInitConfig = ModuleInitConfig("image-v1", {})
     scalar_enc: ModuleInitConfig = ModuleInitConfig("scalar-v1", {})
     decoder: ModuleInitConfig = ModuleInitConfig("scalar-v1", {})
@@ -41,6 +21,10 @@ class BasicPredictorConfig(TorchModelConfig):
         model_cfg = config.model[idx].args
         model_cfg["image_enc"]["args"]["in_ch"] = props["image_ch"]
         model_cfg["scalar_enc"]["args"]["in_ch"] = props["scalar_ch"]
+
+        if model_cfg["scalar_enc"]["type"] == "scalar-v2":
+            model_cfg["scalar_enc"]["args"]["timerange"] = props["timepoints"]
+
         return super().from_config(config, idx)
 
     def __post_init__(self):
@@ -51,10 +35,113 @@ class BasicPredictorConfig(TorchModelConfig):
         if isinstance(self.decoder, dict):
             self.decoder = ModuleInitConfig(**self.decoder)
 
+
+class SnapshotPredictor(nn.Module):
+    """Make basic prediction of game outcome based on single snapshot observation"""
+
+    def __init__(
+        self, image_enc: nn.Module, scalar_enc: nn.Module, decoder: nn.Module
+    ) -> None:
+        super().__init__()
+        self.image_enc = image_enc
+        self.scalar_enc = scalar_enc
+        self.decoder = decoder
+
+    def forward(self, step_data: dict[str, Tensor]) -> Tensor:
+        """Step data features should be [B,T,...]"""
+        # Merge batch and time dimension for minimaps
+        image_feats = self.image_enc(step_data["minimap_features"].flatten(0, 1))
+
+        # Process scalar features per timestep
+        scalar_feats = []
+        for tidx in range(step_data["scalar_features"].shape[1]):
+            scalar_feats.append(self.scalar_enc(step_data["scalar_features"][:, tidx]))
+        # Make same shape as image feats
+        scalar_feats = torch.stack(scalar_feats, dim=1).flatten(0, 1)
+
+        # Stack image and scalar features, decode, then reshape to [B, T, 1]
+        all_feats = torch.cat([image_feats, scalar_feats], dim=-1)
+        result = self.decoder(all_feats).reshape(step_data["win"].shape[0], -1)
+        return result
+
+
+@dataclass
+@MODEL_REGISTRY.register_module("snapshot-prediction")
+class SnapshotConfig(BaseConfig):
+    """Basic snapshot model configuration"""
+
     def get_instance(self, *args, **kwargs) -> Any:
         image_enc = MODEL_REGISTRY[self.image_enc.type](**self.image_enc.args)
         scalar_enc = MODEL_REGISTRY[self.scalar_enc.type](**self.scalar_enc.args)
         decoder = MODEL_REGISTRY[self.decoder.type](
             in_ch=image_enc.out_ch + scalar_enc.out_ch, **self.decoder.args
         )
-        return self._apply_extra(BasicPredictor(image_enc, scalar_enc, decoder))
+        return self._apply_extra(SnapshotPredictor(image_enc, scalar_enc, decoder))
+
+
+class SequencePredictor(nn.Module):
+    """
+    Predict the outcome of a game depending based on a small sequence of observations.
+    The decoder should handle unraveling a set of stacked features
+    """
+
+    def __init__(
+        self,
+        image_enc: nn.Module,
+        scalar_enc: nn.Module,
+        decoder: nn.Module,
+        window_size: int,
+        non_overlapping: bool,
+    ) -> None:
+        super().__init__()
+        self.image_enc = image_enc
+        self.scalar_enc = scalar_enc
+        self.decoder = decoder
+        self.window_size = window_size
+        self.non_overlapping = non_overlapping
+
+    def forward(self, step_data: dict[str, Tensor]) -> Tensor:
+        """"""
+        n_timestep = step_data["scalar_features"].shape[1]
+        # Merge batch and time dimension for minimaps
+        image_feats = self.image_enc(step_data["minimap_features"].flatten(0, 1))
+
+        # Process scalar features per timestep
+        scalar_feats = []
+        for tidx in range(n_timestep):
+            scalar_feats.append(self.scalar_enc(step_data["scalar_features"][:, tidx]))
+        # Make same shape as image feats
+        scalar_feats = torch.stack(scalar_feats, dim=1).flatten(0, 1)
+
+        # Stack image and scalar features, decode, then reshape to [B, T, 1]
+        all_feats = torch.cat([image_feats, scalar_feats], dim=-1)
+
+        step = self.window_size if self.training and self.non_overlapping else 1
+
+        result = []
+        for tidx in range(0, n_timestep, step):
+            result.append(self.decoder(all_feats[tidx : tidx + self.window_size]))
+        return torch.stack(result, dim=1)
+
+
+@dataclass
+@MODEL_REGISTRY.register_module("sequence-prediction")
+class SequenceConfig(BaseConfig):
+    """Basic snapshot model configuration"""
+
+    window_size: int = field(kw_only=True)  # Size of sequence window
+    non_overlapping: bool = True  # Don't overlap sequence windows during training
+
+    def get_instance(self, *args, **kwargs) -> Any:
+        image_enc = MODEL_REGISTRY[self.image_enc.type](**self.image_enc.args)
+        scalar_enc = MODEL_REGISTRY[self.scalar_enc.type](**self.scalar_enc.args)
+        decoder = MODEL_REGISTRY[self.decoder.type](
+            in_ch=image_enc.out_ch + scalar_enc.out_ch,
+            window_size=self.window_size,
+            **self.decoder.args
+        )
+        return self._apply_extra(
+            SequencePredictor(
+                image_enc, scalar_enc, decoder, self.window_size, self.non_overlapping
+            )
+        )

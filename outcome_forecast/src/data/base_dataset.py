@@ -16,19 +16,7 @@ from torch.utils.data import Dataset
 
 from .replay_sampler import SAMPLER_REGISTRY, ReplaySampler
 from .utils import find_closest_indicies
-
-
-@dataclass
-class TimeRange:
-    min: float
-    max: float
-    step: float
-
-    def __post_init__(self):
-        assert self.min < self.max
-
-    def arange(self):
-        return torch.arange(self.min, self.max, self.step)
+from ..utils import TimeRange
 
 
 class SC2ReplayOutcome(Dataset):
@@ -78,15 +66,20 @@ class SC2ReplayOutcome(Dataset):
         except (RuntimeError, IndexError) as err:
             raise RuntimeError(f"Parse failure for {self.parser.info}") from err
 
+        # Find the indicies to sample at based on recorded gamesteps
+        sample_indicies = find_closest_indicies(
+            self.parser.data.gameStep, self._target_game_loops
+        )
+
+        # Determine the features available my running the parser at the first index
+        outputs_list = self.parser.sample(int(sample_indicies[0].item()))
+
         if self.features is not None:
             outputs_list = {k: [outputs_list[k]] for k in self.features}
         else:
             outputs_list = {k: [outputs_list[k]] for k in outputs_list}
 
-        sample_indicies = find_closest_indicies(
-            self.parser.data.gameStep, self._target_game_loops[1:]
-        )
-        for idx in sample_indicies:
+        for idx in sample_indicies[1:]:
             if idx == -1:
                 sample = {k: np.zeros_like(outputs_list[k][-1]) for k in outputs_list}
             else:
@@ -98,7 +91,7 @@ class SC2ReplayOutcome(Dataset):
             "win": torch.as_tensor(
                 self.parser.info.playerResult == Result.Win, dtype=torch.float32
             ),
-            "valid": torch.cat([torch.tensor([True]), sample_indicies != -1]),
+            "valid": (sample_indicies != -1).to(torch.bool),
         }
         for k in outputs_list:
             outputs[k] = torch.stack([torch.as_tensor(o) for o in outputs_list[k]])

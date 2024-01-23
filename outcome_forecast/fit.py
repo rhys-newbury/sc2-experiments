@@ -1,23 +1,22 @@
-from sklearn import preprocessing
-import numpy as np
-from src.data import SC2SQLReplay, Split, TimeRange
-from src.data.utils import gen_val_query
 import os
-from pathlib import Path
-from torch.utils.data import DataLoader
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import KFold
-from sklearn.neural_network import MLPClassifier
-from sklearn import svm
-from sklearn.linear_model import LogisticRegression
-
 import timeit
-import matplotlib.pyplot as plt
-import typer
-from typing_extensions import Annotated
-from typing import List
 from enum import Enum
+from pathlib import Path
+from typing import List
+
+import matplotlib.pyplot as plt
+import numpy as np
+import typer
 import yaml
+from sklearn import preprocessing, svm
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import KFold, cross_val_score
+from sklearn.neural_network import MLPClassifier
+from src.data.base_dataset import SC2ReplayOutcome
+from src.data.replay_sampler import Split, SQLSampler
+from src.utils import TimeRange
+from torch.utils.data import DataLoader
+from typing_extensions import Annotated
 
 try:
     import xgboost
@@ -73,16 +72,14 @@ def fit_model(
         yaml_data = yaml.safe_load(file)
 
     time = TimeRange(**yaml_data["timepoints"])
-
-    dataset = SC2SQLReplay(
-        Path(os.environ["DATAPATH"]),
-        Split.TRAIN,
-        0.8,
-        {"minimap_features", "scalar_features"},
-        time,
-        gen_val_query(yaml_data["database"], yaml_data["sql_filters"]),
+    sampler = SQLSampler(
         yaml_data["database"],
+        Path(os.environ["DATAPATH"]),
+        yaml_data["sql_filters"],
+        0.8,
+        Split.TRAIN,
     )
+    dataset = SC2ReplayOutcome(sampler, time, {"scalar_features"})
 
     dataloader = DataLoader(dataset, batch_size=8, num_workers=workers)
 

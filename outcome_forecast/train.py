@@ -72,7 +72,7 @@ def main(
     train_modules = PyTorchTrainerModules.from_config(exp_cfg)
 
     wb_writer = []
-    if "wand" in exp_cfg.log_kwargs:
+    if "wandb" in exp_cfg.log_kwargs:
         import wandb
 
         wandb.init(**exp_cfg.log_kwargs.get("wandb", {}))
@@ -86,7 +86,7 @@ def main(
             "binary-acc": src.stats.BinaryAcc.from_config(exp_cfg),
         },
         MultiWriter(
-            [ParquetLogger(exp_cfg.work_dir), TBLogger(exp_cfg.work_dir)] + wb_writer
+            [ParquetLogger(exp_cfg.exp_path), TBLogger(exp_cfg.exp_path)] + wb_writer
         ),
     )
 
