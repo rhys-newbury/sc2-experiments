@@ -218,11 +218,15 @@ class FolderDatasetConfig(DatasetConfig):
 
     def __post_init__(self):
         # Get the original dataset properties
-        with open(self.basepath / "generation-config.yml", "r", encoding="utf-8") as f:
+        with open(self.generation_config_path, "r", encoding="utf-8") as f:
             gen_config = yaml.safe_load(f)
         init_config = DatasetInitConfig.from_dict(gen_config)
         dataset_cfg = make_from_init_config(init_config)
         self._gen_properties = dataset_cfg.properties
+
+    @property
+    def generation_config_path(self):
+        return self.basepath / "generation-config.yml"
 
     @property
     def properties(self) -> dict[str, Any]:

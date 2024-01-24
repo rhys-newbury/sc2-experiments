@@ -1,4 +1,5 @@
 import logging
+import shutil
 from functools import partial
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,7 @@ from konductor.utilities.pbar import PbarType, pbar_wrapper
 from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
 from torch import Tensor
 from typing_extensions import Annotated
+from src.data.base_dataset import FolderDatasetConfig
 
 
 class Trainer(PyTorchTrainer):
@@ -111,9 +113,13 @@ def main(
 
     trainer = Trainer(trainer_cfg, train_modules, data_manager)
 
-    # Set min index?
     data_cfg = get_dataset_config(exp_cfg)
-    trainer.min_index = data_cfg.properties.get("min_index", None)
+    if isinstance(data_cfg, FolderDatasetConfig):
+        shutil.copyfile(
+            data_cfg.generation_config_path,
+            exp_cfg.exp_path / data_cfg.generation_config_path.name,
+        )
+    trainer.min_index = data_cfg.properties.get("min_index", None)  # Set min index?
 
     trainer.train(epoch=epoch)
 
