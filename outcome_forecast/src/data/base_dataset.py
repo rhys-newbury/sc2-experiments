@@ -112,7 +112,8 @@ class SC2ReplayOutcome(Dataset):
 
     def __getitem__(self, index: int):
         replay_file, replay_idx = self.sampler.sample(index)
-        self.db_handle.open(replay_file)
+        if not self.db_handle.load(replay_file):
+            raise FileNotFoundError(replay_file)
         replay_data = self.db_handle.getEntry(replay_idx)
         self.parser.parse_replay(replay_data)
         outputs = self.process_replay()

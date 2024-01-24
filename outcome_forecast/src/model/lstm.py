@@ -8,7 +8,10 @@ class LSTMDecoderV1(nn.Module):
     def __init__(self, in_ch: int, hidden_size: int, num_layers: int):
         super().__init__()
         self.latent = nn.LSTM(
-            input_size=in_ch, hidden_size=hidden_size, batch_first=True
+            input_size=in_ch,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
         )
         self.h0 = nn.Parameter(torch.empty(num_layers, 1, hidden_size))
         self.c0 = nn.Parameter(torch.empty(num_layers, 1, hidden_size))
@@ -19,9 +22,9 @@ class LSTMDecoderV1(nn.Module):
     def forward(self, inputs: Tensor):
         """Input is a [B, T, C] tensor, returns same shape"""
         batch_sz, n_steps = inputs.shape[:2]
-        h, c = self.h0.expand(-1, batch_sz, -1), self.c0.expand(-1, batch_sz, -1)
+        h, c = self.h0.repeat(1, batch_sz, 1), self.c0.repeat(1, batch_sz, 1)
 
         out, _ = self.latent(inputs, (h, c))
         outputs: Tensor = self.decode(out.reshape(batch_sz * n_steps, -1))
-        outputs = outputs.reshape(batch_sz, n_steps, 1)
+        outputs = outputs.reshape(batch_sz, n_steps)
         return outputs
