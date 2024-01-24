@@ -7,6 +7,7 @@ import src
 import torch
 import typer
 import yaml
+from konductor.data import get_dataset_config
 from konductor.init import ExperimentInitConfig, ModuleInitConfig
 from konductor.metadata import DataManager
 from konductor.metadata.loggers import MultiWriter, ParquetLogger, TBLogger, WandBLogger
@@ -25,17 +26,24 @@ from typing_extensions import Annotated
 class Trainer(PyTorchTrainer):
     """Specialize for prediciton"""
 
+    min_index: int | None = None
+
     def data_transform(self, data: dict[str, Tensor]) -> dict[str, Tensor]:
         if torch.cuda.is_available():
             stream = torch.cuda.Stream()
+
+            def filter(x: Tensor | list):
+                return x.cuda(non_blocking=True) if isinstance(x, Tensor) else x
+
             with torch.cuda.stream(stream):
-                data = {k: d.cuda(non_blocking=True) for k, d in data.items()}
+                data = {k: filter(d) for k, d in data.items()}
+
             stream.synchronize()
 
-        if self.modules.trainloader.dataset.min_index is None:
+        if self.min_index is None:
             return data
 
-        mask = data["valid"].sum(axis=1) > self.modules.trainloader.dataset.min_index
+        mask = data["valid"].sum(axis=1) > self.min_index
 
         return {k: d[mask, ...] for k, d in data.items()}
 
@@ -102,6 +110,11 @@ def main(
         )
 
     trainer = Trainer(trainer_cfg, train_modules, data_manager)
+
+    # Set min index?
+    data_cfg = get_dataset_config(exp_cfg)
+    trainer.min_index = data_cfg.properties.get("min_index", None)
+
     trainer.train(epoch=epoch)
 
 

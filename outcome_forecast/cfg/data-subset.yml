@@ -1,0 +1,24 @@
+# Example subsetting of minimap and scalar features
+type: sc2-replay-outcome
+args:
+  features:
+    - minimap_features
+    - scalar_features
+  timepoints:
+    min: 2
+    max: 20
+    step: 0.5
+  sampler_cfg:
+    type: sql
+    args:
+      database: $ENV:gamedata.db
+      filter_query:
+        ["game_length > 6720", "read_success = 1", "parse_success = 1"]
+val_loader:
+  type: PYTORCH_V1
+  args:
+    batch_size: 1
+train_loader:
+  type: PYTORCH_V1
+  args:
+    batch_size: 1

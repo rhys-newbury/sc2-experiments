@@ -1,22 +1,27 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
+import yaml
 from konductor.data import (
+    DATALOADER_REGISTRY,
     DATASET_REGISTRY,
     DatasetConfig,
     ExperimentInitConfig,
     ModuleInitConfig,
     Split,
+    DatasetInitConfig,
+    make_from_init_config,
 )
 from konductor.data._pytorch.dataloader import DataloaderV1Config
 from sc2_replay_reader import Result, get_database_and_parser
 from torch.utils.data import Dataset
 
+from ..utils import TimeRange
 from .replay_sampler import SAMPLER_REGISTRY, ReplaySampler
 from .utils import find_closest_indicies
-from ..utils import TimeRange
 
 
 class SC2ReplayOutcome(Dataset):
@@ -25,12 +30,14 @@ class SC2ReplayOutcome(Dataset):
         sampler: ReplaySampler,
         timepoints: TimeRange,
         features: set[str] | None,
+        metadata: bool = False,
         minimap_layers: list[str] | None = None,
         min_game_time: float | None = None,
     ) -> None:
         super().__init__()
         self.sampler = sampler
         self.features = features
+        self.metadata = metadata
         if self.features is None or "unit_features" in self.features:
             self.db_handle, self.parser = get_database_and_parser(
                 parse_units=True, parse_minimaps=True
@@ -96,6 +103,11 @@ class SC2ReplayOutcome(Dataset):
         for k in outputs_list:
             outputs[k] = torch.stack([torch.as_tensor(o) for o in outputs_list[k]])
 
+        if self.metadata:
+            outputs["metadata"] = self.parser.info.replayHash + str(
+                self.parser.info.playerId
+            )
+
         return outputs
 
     def __getitem__(self, index: int):
@@ -122,6 +134,7 @@ class SC2ReplayConfig(DatasetConfig):
     train_ratio: float = 0.8  # Portion of all data to use for training
     timepoints: TimeRange = TimeRange(0, 30, 2)  # Minutes
     min_game_time: float = 5.0  # Minutes
+    metadata: bool = False  # Return replayHash-playerId data
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
@@ -138,7 +151,7 @@ class SC2ReplayConfig(DatasetConfig):
             self.sampler_cfg = ModuleInitConfig(**self.sampler_cfg)
 
     @property
-    def properties(self) -> Dict[str, Any]:
+    def properties(self) -> dict[str, Any]:
         if self.minimap_layers is not None:
             image_ch = len(self.minimap_layers)
             if "player_relative" in self.minimap_layers:
@@ -160,6 +173,63 @@ class SC2ReplayConfig(DatasetConfig):
         dataset = self.init_auto_filter(
             SC2ReplayOutcome, known_unused=known_unused, sampler=sampler
         )
+        match split:
+            case Split.TRAIN:
+                return self.train_loader.get_instance(dataset)
+            case Split.VAL | Split.TEST:
+                return self.train_loader.get_instance(dataset)
+            case _:
+                raise RuntimeError(f"How did I get here with {split=}")
+
+
+class FolderDataset(Dataset):
+    """
+    Basic folder dataset (basepath/split/sample.npz) which contains numpy
+    files that contain the expected format to train on directly
+    """
+
+    def __init__(self, basepath: Path, split: Split) -> None:
+        super().__init__()
+        self.folder = basepath / split.name.lower()
+        assert self.folder.exists(), f"Root folder doesn't exist: {basepath}"
+        self.files = [f.name for f in self.folder.iterdir()]
+
+    def __len__(self) -> int:
+        return len(self.files)
+
+    def __getitem__(self, index: int):
+        data = np.load(self.folder / self.files[index], allow_pickle=True)
+
+        def transform(x: np.ndarray):
+            return str(x) if "str" in x.dtype.name else torch.tensor(x)
+
+        return {k: transform(v) for k, v in data.items()}
+
+
+@dataclass
+@DATASET_REGISTRY.register_module("folder-dataset")
+class FolderDatasetConfig(DatasetConfig):
+    # Dataloader type we want to use
+    train_loader: DataloaderV1Config
+    val_loader: DataloaderV1Config
+
+    _gen_properties: dict[str, Any] = field(init=False)
+
+    def __post_init__(self):
+        # Get the original dataset properties
+        with open(self.basepath / "generation-config.yml", "r", encoding="utf-8") as f:
+            gen_config = yaml.safe_load(f)
+        init_config = DatasetInitConfig.from_dict(gen_config)
+        dataset_cfg = make_from_init_config(init_config)
+        self._gen_properties = dataset_cfg.properties
+
+    @property
+    def properties(self) -> dict[str, Any]:
+        """Get properties from original generated version"""
+        return self._gen_properties
+
+    def get_dataloader(self, split: Split) -> Any:
+        dataset = FolderDataset(self.basepath, split)
         match split:
             case Split.TRAIN:
                 return self.train_loader.get_instance(dataset)
