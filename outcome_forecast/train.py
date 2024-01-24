@@ -103,7 +103,7 @@ def main(
     if brief is not None:
         data_manager.metadata.brief = brief
 
-    trainer_cfg = PyTorchTrainerConfig()
+    trainer_cfg = PyTorchTrainerConfig(**exp_cfg.trainer_kwargs)
     if pbar and comm.get_local_rank() == 0:
         trainer_cfg.pbar = partial(pbar_wrapper, pbar_type=PbarType.LIVE)
     elif comm.get_local_rank() == 0:
