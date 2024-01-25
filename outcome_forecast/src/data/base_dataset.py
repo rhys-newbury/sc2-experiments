@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 import numpy as np
 import torch
@@ -204,7 +205,12 @@ class FolderDataset(Dataset):
         def transform(x: np.ndarray):
             return str(x) if "str" in x.dtype.name else torch.tensor(x)
 
-        return {k: transform(v) for k, v in data.items()}
+        try:
+            out_data = {k: transform(v) for k, v in data.items()}
+        except BadZipFile as e:
+            raise RuntimeError(f"Got bad data from {self.files[index]}") from e
+
+        return out_data
 
 
 @dataclass
