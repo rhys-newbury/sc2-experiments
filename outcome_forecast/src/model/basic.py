@@ -11,19 +11,24 @@ from konductor.models._pytorch import TorchModelConfig
 
 @dataclass
 class BaseConfig(TorchModelConfig):
-    image_enc: ModuleInitConfig = ModuleInitConfig("image-v1", {})
-    scalar_enc: ModuleInitConfig = ModuleInitConfig("scalar-v1", {})
-    decoder: ModuleInitConfig = ModuleInitConfig("scalar-v1", {})
+    image_enc: ModuleInitConfig | None = None
+    scalar_enc: ModuleInitConfig | None = None
+    decoder: ModuleInitConfig = field(kw_only=True)
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0) -> Any:
         props = get_dataset_properties(config)
         model_cfg = config.model[idx].args
-        model_cfg["image_enc"]["args"]["in_ch"] = props["image_ch"]
-        model_cfg["scalar_enc"]["args"]["in_ch"] = props["scalar_ch"]
 
-        if model_cfg["scalar_enc"]["type"] == "scalar-v2":
-            model_cfg["scalar_enc"]["args"]["timerange"] = props["timepoints"]
+        if image_enc := model_cfg.get("image_enc", None):
+            image_enc["args"]["in_ch"] = props["image_ch"]
+
+        if scalar_enc := model_cfg.get("scalar_enc", None):
+            scalar_enc["args"]["in_ch"] = props["scalar_ch"]
+            if scalar_enc["type"] == "scalar-v2":
+                scalar_enc["args"]["timerange"] = props["timepoints"]
+
+        assert image_enc or scalar_enc, "At least Image or Scalar encoder required"
 
         return super().from_config(config, idx)
 
@@ -40,7 +45,10 @@ class SnapshotPredictor(nn.Module):
     """Make basic prediction of game outcome based on single snapshot observation"""
 
     def __init__(
-        self, image_enc: nn.Module, scalar_enc: nn.Module, decoder: nn.Module
+        self,
+        image_enc: nn.Module | None,
+        scalar_enc: nn.Module | None,
+        decoder: nn.Module,
     ) -> None:
         super().__init__()
         self.image_enc = image_enc
@@ -50,18 +58,25 @@ class SnapshotPredictor(nn.Module):
     def forward(self, step_data: dict[str, Tensor]) -> Tensor:
         """Step data features should be [B,T,...]"""
         # Merge batch and time dimension for minimaps
-        image_feats = self.image_enc(step_data["minimap_features"].flatten(0, 1))
+        feats: list[Tensor] = []
+        if self.image_enc is not None:
+            feats.append(self.image_enc(step_data["minimap_features"].flatten(0, 1)))
 
-        # Process scalar features per timestep
-        scalar_feats = []
-        for tidx in range(step_data["scalar_features"].shape[1]):
-            scalar_feats.append(self.scalar_enc(step_data["scalar_features"][:, tidx]))
-        # Make same shape as image feats
-        scalar_feats = torch.stack(scalar_feats, dim=1).flatten(0, 1)
+        if self.scalar_enc is not None:
+            # Process scalar features per timestep
+            scalar_feats = []
+            for tidx in range(step_data["scalar_features"].shape[1]):
+                scalar_feats.append(
+                    self.scalar_enc(step_data["scalar_features"][:, tidx])
+                )
+            # Make same shape as image feats
+            feats.append(torch.stack(scalar_feats, dim=1).flatten(0, 1))
 
-        # Stack image and scalar features, decode, then reshape to [B, T, 1]
-        all_feats = torch.cat([image_feats, scalar_feats], dim=-1)
+        # Cat feats if more than 1, or remove list dimension
+        all_feats = torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0]
+
         result = self.decoder(all_feats).reshape(step_data["win"].shape[0], -1)
+
         return result
 
 
@@ -71,10 +86,18 @@ class SnapshotConfig(BaseConfig):
     """Basic snapshot model configuration"""
 
     def get_instance(self, *args, **kwargs) -> Any:
-        image_enc = MODEL_REGISTRY[self.image_enc.type](**self.image_enc.args)
-        scalar_enc = MODEL_REGISTRY[self.scalar_enc.type](**self.scalar_enc.args)
+        def get_enc_ch(conf: ModuleInitConfig | None):
+            """Get encoder model and channels if not None"""
+            if conf is None:
+                return None, 0
+            model = MODEL_REGISTRY[conf.type](**conf.args)
+            return model, model.out_ch
+
+        image_enc, image_ch = get_enc_ch(self.image_enc)
+        scalar_enc, scalar_ch = get_enc_ch(self.scalar_enc)
+
         decoder = MODEL_REGISTRY[self.decoder.type](
-            in_ch=image_enc.out_ch + scalar_enc.out_ch, **self.decoder.args
+            in_ch=image_ch + scalar_ch, **self.decoder.args
         )
         return self._apply_extra(SnapshotPredictor(image_enc, scalar_enc, decoder))
 
@@ -86,7 +109,10 @@ class SequencePredictor(nn.Module):
     """
 
     def __init__(
-        self, image_enc: nn.Module, scalar_enc: nn.Module, decoder: nn.Module
+        self,
+        image_enc: nn.Module | None,
+        scalar_enc: nn.Module | None,
+        decoder: nn.Module,
     ) -> None:
         super().__init__()
         self.image_enc = image_enc
@@ -96,19 +122,24 @@ class SequencePredictor(nn.Module):
     def forward(self, step_data: dict[str, Tensor]) -> Tensor:
         """"""
         batch_sz, n_timestep = step_data["scalar_features"].shape[:2]
-        # Merge batch and time dimension for minimaps
-        image_feats = self.image_enc(step_data["minimap_features"].flatten(0, 1))
-        image_feats = image_feats.reshape(batch_sz, n_timestep, -1)
+        feats: list[Tensor] = []
+        if self.image_enc is not None:
+            # Merge batch and time dimension for minimaps
+            image_feats = self.image_enc(step_data["minimap_features"].flatten(0, 1))
+            feats.append(image_feats.reshape(batch_sz, n_timestep, -1))
 
-        # Process scalar features per timestep
-        scalar_feats = []
-        for tidx in range(n_timestep):
-            scalar_feats.append(self.scalar_enc(step_data["scalar_features"][:, tidx]))
-        # Make same shape as image feats
-        scalar_feats = torch.stack(scalar_feats, dim=1)
+        if self.scalar_enc is not None:
+            # Process scalar features per timestep
+            scalar_feats = []
+            for tidx in range(n_timestep):
+                scalar_feats.append(
+                    self.scalar_enc(step_data["scalar_features"][:, tidx])
+                )
+            # Make same shape as image feats
+            feats.append(torch.stack(scalar_feats, dim=1))
 
         # Stack image and scalar features, decode, then reshape to [B, T, 1]
-        all_feats = torch.cat([image_feats, scalar_feats], dim=-1)
+        all_feats = torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0]
 
         return self.decoder(all_feats)
 
@@ -119,9 +150,17 @@ class SequenceConfig(BaseConfig):
     """Basic snapshot model configuration"""
 
     def get_instance(self, *args, **kwargs) -> Any:
-        image_enc = MODEL_REGISTRY[self.image_enc.type](**self.image_enc.args)
-        scalar_enc = MODEL_REGISTRY[self.scalar_enc.type](**self.scalar_enc.args)
+        def get_enc_ch(conf: ModuleInitConfig | None):
+            """Get encoder model and channels if not None"""
+            if conf is None:
+                return None, 0
+            model = MODEL_REGISTRY[conf.type](**conf.args)
+            return model, model.out_ch
+
+        image_enc, image_ch = get_enc_ch(self.image_enc)
+        scalar_enc, scalar_ch = get_enc_ch(self.scalar_enc)
+
         decoder = MODEL_REGISTRY[self.decoder.type](
-            in_ch=image_enc.out_ch + scalar_enc.out_ch, **self.decoder.args
+            in_ch=image_ch + scalar_ch, **self.decoder.args
         )
         return self._apply_extra(SequencePredictor(image_enc, scalar_enc, decoder))
