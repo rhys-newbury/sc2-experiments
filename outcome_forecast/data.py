@@ -25,8 +25,7 @@ def convert_split(outfolder: Path, dataloader):
             for k, v in sample.items():
                 v = v[0]
                 formatted[k] = v if isinstance(v, str) else v.numpy()
-            outpath = outfolder / (formatted["metadata"] + ".npy")
-            np.savez_compressed(outpath, **formatted)
+            np.savez_compressed(outfolder / formatted["metadata"], **formatted)
             pbar.update(1)
 
 
