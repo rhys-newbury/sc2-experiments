@@ -7,7 +7,6 @@ import numpy as np
 import torch
 import yaml
 from konductor.data import (
-    DATALOADER_REGISTRY,
     DATASET_REGISTRY,
     DatasetConfig,
     ExperimentInitConfig,
@@ -165,7 +164,13 @@ class SC2ReplayConfig(DatasetConfig):
         return ret
 
     def get_dataloader(self, split: Split) -> Any:
-        known_unused = {"train_loader", "val_loader", "basepath"}
+        known_unused = {
+            "train_loader",
+            "val_loader",
+            "basepath",
+            "sampler_cfg",
+            "train_ratio",
+        }
         sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](
             split=split,
             train_ratio=self.train_ratio,
