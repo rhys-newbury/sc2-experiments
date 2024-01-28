@@ -14,6 +14,7 @@ VALID_GPUS = [
     "NVIDIA-GeForce-RTX-3090",
     "NVIDIA-RTX-A6000",
     "Quadro-GV100",
+    "Tesla-T4",
 ]
 
 
