@@ -82,10 +82,10 @@ def main(
     train_modules = PyTorchTrainerModules.from_config(exp_cfg)
 
     wb_writer = []
-    if "wandb" in exp_cfg.log_kwargs:
+    if "wandb" in exp_cfg.logger:
         import wandb
 
-        wandb.init(**exp_cfg.log_kwargs.get("wandb", {}))
+        wandb.init(**exp_cfg.logger.get("wandb", {}))
         wb_writer = [WandBLogger()]
 
     data_manager = DataManager.default_build(
@@ -103,7 +103,7 @@ def main(
     if brief is not None:
         data_manager.metadata.brief = brief
 
-    trainer_cfg = PyTorchTrainerConfig(**exp_cfg.trainer_kwargs)
+    trainer_cfg = PyTorchTrainerConfig(**exp_cfg.trainer)
     if pbar and comm.get_local_rank() == 0:
         trainer_cfg.pbar = partial(pbar_wrapper, pbar_type=PbarType.LIVE)
     elif comm.get_local_rank() == 0:
