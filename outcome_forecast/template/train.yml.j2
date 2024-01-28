@@ -44,14 +44,14 @@ spec:
                   cpu: {{ cpu }}m
                   nvidia.com/gpu: {{ n_gpu }}
                 limits:
-                  memory: {{ mem * 1.5 }}Gi
-                  cpu: {{ cpu * 1.5 }}m
+                  memory: {{ (mem * 1.5) | int }}Gi
+                  cpu: {{ (cpu * 1.5) | int }}m
                   nvidia.com/gpu: {{ n_gpu }}
               volumeMounts:
                 - name: storage
                   mountPath: /mnt/storage
-                - mountPath: /dev/shm
-                  name: dshm
+                - name: dshm
+                  mountPath: /dev/shm
           volumes:
             - name: storage
               nfs:
