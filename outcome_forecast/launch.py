@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
+import subprocess
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from jinja2 import Environment, FileSystemLoader
-from kubernetes import client, config, utils
 
 app = typer.Typer()
 
@@ -52,10 +52,7 @@ def main(
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(kube_manifest)
 
-    config.load_kube_config()
-
-    k8s_client = client.ApiClient()
-    utils.create_from_yaml(k8s_client, out_path)
+    subprocess.run(["kubectl", "apply", "-f", str(out_path)], check=True)
 
 
 if __name__ == "__main__":
