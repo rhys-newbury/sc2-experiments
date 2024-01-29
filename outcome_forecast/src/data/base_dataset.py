@@ -292,13 +292,8 @@ class DaliFolderDataset(BaseDALIDataset):
 
         data = np.load(self.folder / self.files[sample_idx], allow_pickle=True)
 
-        def transform(x: np.ndarray):
-            if len(x.shape) == 0:
-                return x[None]  # Add emtpy dim
-            return x
-
         try:
-            out_data = tuple(transform(data[k]) for k in self.keys)
+            out_data = tuple(data[k] for k in self.keys)
         except BadZipFile as e:
             raise RuntimeError(f"Got bad data from {self.files[sample_idx]}") from e
 
@@ -354,7 +349,7 @@ def folder_pipeline(
     pipe = Pipeline.current()
 
     dtypes = {
-        "win": FeatureType(DALIDataType.FLOAT, 1),
+        "win": FeatureType(DALIDataType.FLOAT, 0),
         "valid": FeatureType(DALIDataType.BOOL, 1),
         "metadata": FeatureType(DALIDataType.STRING, 1),
         "scalar_features": FeatureType(DALIDataType.FLOAT, 2),
