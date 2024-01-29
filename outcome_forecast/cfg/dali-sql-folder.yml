@@ -1,0 +1,46 @@
+dataset:
+  - type: dali-folder
+    args:
+      # keys: [win, valid, metadata, scalar_features, minimap_features]
+      keys: [win, valid, minimap_features, scalar_features]
+    val_loader:
+      type: DALI
+      args:
+        batch_size: 128
+        drop_last: true
+    train_loader:
+      type: DALI
+      args:
+        shuffle: true
+        batch_size: 64
+        drop_last: true
+criterion:
+  - type: win-bce
+    args: {}
+model:
+  - type: snapshot-prediction
+    args:
+      image_enc:
+        type: image-v1
+        args: {}
+      scalar_enc:
+        type: scalar-v2
+        args:
+          strategy: batch_norm
+      decoder:
+        type: scalar-v1
+        args:
+          out_ch: 1
+    optimizer:
+      type: adam
+      args:
+        step_interval: 1
+        lr: 1.e-5
+        gradient_clipping: 0.01
+      scheduler:
+        type: poly
+        args:
+          max_iter: 25
+          power: 0.9
+logger:
+  interval: 500
