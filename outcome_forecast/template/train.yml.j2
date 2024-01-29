@@ -21,7 +21,7 @@ spec:
             nvidia.com/gpu.product: {{ gpu_name }}
           containers:
             - name: runner
-              image: mu00120825.eng.monash.edu.au:5000/sc2-experiments:latest
+              image: {{ registry }}/sc2-experiments:{{ git_branch }}
               imagePullPolicy: Always
               command:
                 [

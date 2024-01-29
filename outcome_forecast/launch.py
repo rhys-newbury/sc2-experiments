@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import subprocess
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -38,6 +39,11 @@ def main(
     if brief := input("brief (''): "):
         template_conf["brief"] = brief
     template_conf["epochs"] = int(input("epochs: "))
+    template_conf["registry"] = os.environ["REGISTRY_URL"]
+    proc = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], check=True, capture_output=True
+    )
+    template_conf["git_branch"] = proc.stdout.decode().strip()
 
     print("GPU Names Available")
     for idx, name in enumerate(VALID_GPUS):
