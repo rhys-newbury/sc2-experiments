@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from pathlib import Path
 from typing import Annotated
 
@@ -47,8 +48,8 @@ def main(
     template = env.get_template(template_name)
 
     kube_manifest = template.render(template_conf)
-    out_path = out_dir / exp_config
-    with open(out_path.with_suffix(".yaml"), "w", encoding="utf-8") as f:
+    out_path = (out_dir / exp_config).with_suffix(".yaml")
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write(kube_manifest)
 
     config.load_kube_config()

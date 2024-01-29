@@ -179,8 +179,9 @@ class ScalarEncoderV2(nn.Module):
 
     def forward(self, inputs: Tensor) -> Tensor:
         """Inputs are assumed to all be of the same timestep which is the gameStep"""
-        timestep = inputs[0, -1] / (22.4 * 60)
-        mod_idx = int(torch.argmin((timestep - self.timerange).abs()))
+        with torch.no_grad():
+            timestep = inputs[0, -1] / (22.4 * 60)
+            mod_idx = int(torch.argmin((timestep - self.timerange).abs()))
 
         norm_idx = mod_idx if len(self.batch_norms) > 1 else 0
         norm_feats = self.batch_norms[norm_idx](inputs[..., :-1])

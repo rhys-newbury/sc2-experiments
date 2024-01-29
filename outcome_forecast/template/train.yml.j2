@@ -1,7 +1,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: {{ exp_config }}
+  name: sc2-{{ exp_config }}
 spec:
   maxRetry: 1
   minAvailable: 1
