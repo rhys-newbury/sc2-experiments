@@ -4,6 +4,9 @@ from typing import Any
 from zipfile import BadZipFile
 
 import numpy as np
+from nvidia.dali import fn
+from nvidia.dali.types import SampleInfo, DALIDataType
+from nvidia.dali.pipeline import pipeline_def, Pipeline
 import torch
 import yaml
 from konductor.data import (
@@ -16,12 +19,13 @@ from konductor.data import (
     make_from_init_config,
 )
 from konductor.data._pytorch.dataloader import DataloaderV1Config
+from konductor.data.dali import DaliLoaderConfig
 from sc2_replay_reader import Result, get_database_and_parser
 from torch.utils.data import Dataset
 
 from ..utils import TimeRange
 from .replay_sampler import SAMPLER_REGISTRY, ReplaySampler
-from .utils import find_closest_indicies
+from .utils import find_closest_indicies, BaseDALIDataset
 
 
 class SC2ReplayOutcome(Dataset):
@@ -253,3 +257,117 @@ class FolderDatasetConfig(DatasetConfig):
                 return self.train_loader.get_instance(dataset)
             case _:
                 raise RuntimeError(f"How did I get here with {split=}")
+
+
+class DaliFolderDataset(BaseDALIDataset):
+    def __init__(
+        self,
+        path: Path,
+        split: Split,
+        keys: list[str],
+        batch_size: int,
+        shard_id: int,
+        num_shards: int,
+        random_shuffle: bool,
+    ) -> None:
+        super().__init__(batch_size, shard_id, num_shards, random_shuffle)
+        self.split = split
+        self.keys = keys
+        self.folder = path / split.name.lower()
+
+        if not self.folder.exists():
+            raise FileNotFoundError(self.folder)
+
+        self.files: list[str] = []
+
+    def _initialize(self):
+        self.files = [f.name for f in self.folder.iterdir()]
+        return super()._initialize()
+
+    def __len__(self) -> int:
+        return len(self.files)
+
+    def __call__(self, sample_info: SampleInfo):
+        sample_idx = super().__call__(sample_info)
+
+        data = np.load(self.folder / self.files[sample_idx], allow_pickle=True)
+
+        def transform(x: np.ndarray):
+            if len(x.shape) == 0:
+                return x[None]  # Add emtpy dim
+            return x
+
+        try:
+            out_data = tuple(transform(data[k]) for k in self.keys)
+        except BadZipFile as e:
+            raise RuntimeError(f"Got bad data from {self.files[sample_idx]}") from e
+
+        return out_data
+
+
+@dataclass
+@DATASET_REGISTRY.register_module("dali-folder")
+class DaliFolderDatasetConfig(FolderDatasetConfig):
+    train_loader: DaliLoaderConfig
+    val_loader: DaliLoaderConfig
+    keys: list[str]  # List of items to read
+
+    def _get_size(self, split: Split, **kwargs):
+        inst = DaliFolderDataset(
+            self.basepath,
+            split,
+            self.keys,
+            kwargs["batch_size"],
+            kwargs.get("shard_id", 0),
+            kwargs.get("num_shards", 1),
+            False,  # shuffle is irrelevant
+        )
+        inst._initialize()
+        return inst.num_iterations * inst.batch_size
+
+    def get_dataloader(self, split: Split) -> Any:
+        loader = self.train_loader if split is Split.TRAIN else self.val_loader
+        pipeline = folder_pipeline(
+            path=self.basepath, split=split, keys=self.keys, **loader.pipe_kwargs()
+        )
+        size = self._get_size(split, **loader.pipe_kwargs())
+        return loader.get_instance(pipeline, out_map=self.keys, size=size)
+
+
+@dataclass
+class FeatureType:
+    dtype: DALIDataType
+    ndim: int
+
+
+@pipeline_def(py_start_method="spawn")
+def folder_pipeline(
+    shard_id: int,
+    num_shards: int,
+    random_shuffle: bool,
+    path: Path,
+    split: Split,
+    keys: list[str],
+    augmentations: list[ModuleInitConfig],
+):
+    """Create pipeline"""
+    pipe = Pipeline.current()
+
+    dtypes = {
+        "win": FeatureType(DALIDataType.FLOAT, 1),
+        "valid": FeatureType(DALIDataType.BOOL, 1),
+        "metadata": FeatureType(DALIDataType.STRING, 1),
+        "scalar_features": FeatureType(DALIDataType.FLOAT, 2),
+        "minimap_features": FeatureType(DALIDataType.FLOAT, 4),
+    }
+    outputs = fn.external_source(
+        source=DaliFolderDataset(
+            path, split, keys, pipe.batch_size, shard_id, num_shards, random_shuffle
+        ),
+        num_outputs=len(keys),
+        parallel=True,
+        batch=False,
+        dtype=[dtypes[k].dtype for k in keys],
+        ndim=[dtypes[k].ndim for k in keys],
+    )
+    return tuple(o.gpu() for o in outputs)

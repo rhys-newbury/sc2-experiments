@@ -30,8 +30,12 @@ class Trainer(PyTorchTrainer):
 
     min_index: int | None = None
 
-    def data_transform(self, data: dict[str, Tensor]) -> dict[str, Tensor]:
-        if torch.cuda.is_available():
+    def data_transform(
+        self, data: dict[str, Tensor] | list[dict[str, Tensor]]
+    ) -> dict[str, Tensor]:
+        if isinstance(data, list):
+            data = data[0]  # Unwrap dali pipeline list, should already be on gpu
+        elif torch.cuda.is_available():
             stream = torch.cuda.Stream()
 
             def filter(x: Tensor | list):

@@ -1,7 +1,11 @@
-from typing import Sequence, List
-from pathlib import Path
 import sqlite3
+from logging import getLogger
+from pathlib import Path
+from typing import Sequence
+
+import numpy as np
 import torch
+from nvidia.dali import types
 from torch import Tensor
 
 
@@ -28,7 +32,7 @@ def find_closest_indicies(options: Sequence[int], targets: Sequence[int]):
     return nearest
 
 
-def gen_val_query(database: Path, sql_filters: List[str] | None):
+def gen_val_query(database: Path, sql_filters: list[str] | None):
     """Transform list of sql filters to valid query and test that it works"""
     sql_filter_string = (
         ""
@@ -44,3 +48,58 @@ def gen_val_query(database: Path, sql_filters: List[str] | None):
         except sqlite3.OperationalError as e:
             raise AssertionError("Invalid SQL Syntax") from e
     return sql_query
+
+
+class BaseDALIDataset:
+    """External Iterator for DALI"""
+
+    def __init__(
+        self,
+        batch_size: int,
+        shard_id: int,
+        num_shards: int,
+        random_shuffle: bool,
+    ) -> None:
+        self.logger = getLogger(type(self).__name__)
+        self.shard_id = shard_id
+        self.batch_size = batch_size
+        self.num_shards = num_shards
+        self.random_shuffle = random_shuffle
+        self.idx_samples: np.ndarray = np.zeros(0, dtype=np.int64)
+        self.last_seen_epoch = -1
+
+    def _initialize(self):
+        self.idx_samples = np.arange(len(self), dtype=np.int64)
+
+    def __len__(self):
+        raise NotImplementedError
+
+    def __getstate__(self):
+        return self.__dict__.copy()
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._initialize()
+
+    @property
+    def num_iterations(self):
+        return len(self) // self.num_shards // self.batch_size
+
+    def resample_indicies(self, sample_info: types.SampleInfo):
+        self.last_seen_epoch = sample_info.epoch_idx
+        self.idx_samples = np.random.default_rng(
+            seed=42 + sample_info.epoch_idx
+        ).permutation(len(self))
+
+    def __call__(self, sample_info: types.SampleInfo) -> int:
+        if len(self) == 0:
+            self._initialize()
+
+        if sample_info.iteration >= self.num_iterations:
+            raise StopIteration
+
+        if self.random_shuffle and sample_info.epoch_idx != self.last_seen_epoch:
+            self.resample_indicies(sample_info)
+
+        idx = sample_info.idx_in_epoch + self.shard_id
+        return self.idx_samples[idx].item()
