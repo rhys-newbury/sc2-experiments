@@ -20,6 +20,7 @@ class ImageEncV1(nn.Module):
         out_ch: int = 32,
         n_layers: int = 3,
         pooling: Literal["max", "avg"] = "max",
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.encoder = nn.ModuleList(
@@ -38,6 +39,7 @@ class ImageEncV1(nn.Module):
                     ),
                     nn.BatchNorm2d(2 * hidden_ch),
                     nn.ReLU(),
+                    nn.Dropout2d(dropout),
                 ]
             )
         match pooling:
@@ -54,6 +56,7 @@ class ImageEncV1(nn.Module):
                 nn.ReLU(),
                 nn.Flatten(),
                 nn.Linear(hidden_ch * 3 * 3, out_ch),
+                nn.Dropout(dropout),
             ]
         )
         self._out_ch = out_ch
@@ -75,6 +78,7 @@ def make_basic_encoder(
     n_layers: int,
     norm: type[nn.Module] = nn.LayerNorm,
     activation: type[nn.Module] = nn.LeakyReLU,
+    dropout: float = 0.0,
 ):
     """
     Create basic linear encoder with linear->norm->activation loop
@@ -88,6 +92,7 @@ def make_basic_encoder(
                 nn.Linear(_hidden_ch, 2 * hidden_ch),
                 norm(2 * hidden_ch),
                 activation(),
+                nn.Dropout(dropout),
             ]
         )
     encoder.append(nn.Linear(2 * hidden_ch, out_ch))
@@ -100,10 +105,17 @@ class ScalarEncoderV1(nn.Module):
     """Simple set of linear layers to encode feature vector"""
 
     def __init__(
-        self, in_ch: int, hidden_ch: int = 32, out_ch: int = 32, n_layers: int = 2
+        self,
+        in_ch: int,
+        hidden_ch: int = 32,
+        out_ch: int = 32,
+        n_layers: int = 2,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        self.encoder = make_basic_encoder(in_ch, hidden_ch, out_ch, n_layers)
+        self.encoder = make_basic_encoder(
+            in_ch, hidden_ch, out_ch, n_layers, dropout=dropout
+        )
         self._out_ch = out_ch
 
     @property
@@ -142,6 +154,7 @@ class ScalarEncoderV2(nn.Module):
         hidden_ch: int = 32,
         out_ch: int = 32,
         n_layers: int = 2,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         if isinstance(strategy, str):
@@ -152,7 +165,7 @@ class ScalarEncoderV2(nn.Module):
         self.time_idx = time_idx
         self.batch_norms = nn.ModuleList([nn.BatchNorm1d(in_ch)])
         self.encoders = nn.ModuleList(
-            [make_basic_encoder(in_ch, hidden_ch, out_ch, n_layers)]
+            [make_basic_encoder(in_ch, hidden_ch, out_ch, n_layers, dropout=dropout)]
         )
         self.strategy = strategy
         self._out_ch = out_ch

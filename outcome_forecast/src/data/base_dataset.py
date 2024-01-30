@@ -357,7 +357,7 @@ def folder_pipeline(
     }
     outputs = fn.external_source(
         source=DaliFolderDataset(
-            path, split, keys, pipe.batch_size, shard_id, num_shards, random_shuffle
+            path, split, keys, pipe.max_batch_size, shard_id, num_shards, random_shuffle
         ),
         num_outputs=len(keys),
         parallel=True,

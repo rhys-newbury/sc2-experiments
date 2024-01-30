@@ -14,6 +14,7 @@ class BaseConfig(TorchModelConfig):
     image_enc: ModuleInitConfig | None = None
     scalar_enc: ModuleInitConfig | None = None
     decoder: ModuleInitConfig = field(kw_only=True)
+    dropout: float = 0.0
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0) -> Any:
@@ -49,11 +50,13 @@ class SnapshotPredictor(nn.Module):
         image_enc: nn.Module | None,
         scalar_enc: nn.Module | None,
         decoder: nn.Module,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.image_enc = image_enc
         self.scalar_enc = scalar_enc
         self.decoder = decoder
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, step_data: dict[str, Tensor]) -> Tensor:
         """Step data features should be [B,T,...]"""
@@ -64,16 +67,17 @@ class SnapshotPredictor(nn.Module):
 
         if self.scalar_enc is not None:
             # Process scalar features per timestep
-            scalar_feats = []
-            for tidx in range(step_data["scalar_features"].shape[1]):
-                scalar_feats.append(
-                    self.scalar_enc(step_data["scalar_features"][:, tidx])
-                )
+            scalar_feats = [
+                self.scalar_enc(step_data["scalar_features"][:, tidx])
+                for tidx in range(step_data["scalar_features"].shape[1])
+            ]
             # Make same shape as image feats
             feats.append(torch.stack(scalar_feats, dim=1).flatten(0, 1))
 
         # Cat feats if more than 1, or remove list dimension
         all_feats = torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0]
+
+        all_feats = self.dropout(all_feats)
 
         result = self.decoder(all_feats).reshape(step_data["win"].shape[0], -1)
 
@@ -86,20 +90,22 @@ class SnapshotConfig(BaseConfig):
     """Basic snapshot model configuration"""
 
     def get_instance(self, *args, **kwargs) -> Any:
-        def get_enc_ch(conf: ModuleInitConfig | None):
-            """Get encoder model and channels if not None"""
+        def get_mod_ch(conf: ModuleInitConfig | None):
+            """Get module and channels if not None"""
             if conf is None:
                 return None, 0
-            model = MODEL_REGISTRY[conf.type](**conf.args)
+            model = MODEL_REGISTRY[conf.type](**conf.args, dropout=self.dropout)
             return model, model.out_ch
 
-        image_enc, image_ch = get_enc_ch(self.image_enc)
-        scalar_enc, scalar_ch = get_enc_ch(self.scalar_enc)
+        image_enc, image_ch = get_mod_ch(self.image_enc)
+        scalar_enc, scalar_ch = get_mod_ch(self.scalar_enc)
 
         decoder = MODEL_REGISTRY[self.decoder.type](
             in_ch=image_ch + scalar_ch, **self.decoder.args
         )
-        return self._apply_extra(SnapshotPredictor(image_enc, scalar_enc, decoder))
+        return self._apply_extra(
+            SnapshotPredictor(image_enc, scalar_enc, decoder, self.dropout)
+        )
 
 
 class SequencePredictor(nn.Module):
@@ -113,11 +119,13 @@ class SequencePredictor(nn.Module):
         image_enc: nn.Module | None,
         scalar_enc: nn.Module | None,
         decoder: nn.Module,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.image_enc = image_enc
         self.scalar_enc = scalar_enc
         self.decoder = decoder
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, step_data: dict[str, Tensor]) -> Tensor:
         """"""
@@ -130,16 +138,17 @@ class SequencePredictor(nn.Module):
 
         if self.scalar_enc is not None:
             # Process scalar features per timestep
-            scalar_feats = []
-            for tidx in range(n_timestep):
-                scalar_feats.append(
-                    self.scalar_enc(step_data["scalar_features"][:, tidx])
-                )
+            scalar_feats = [
+                self.scalar_enc(step_data["scalar_features"][:, tidx])
+                for tidx in range(n_timestep)
+            ]
             # Make same shape as image feats
             feats.append(torch.stack(scalar_feats, dim=1))
 
         # Stack image and scalar features, decode, then reshape to [B, T, 1]
         all_feats = torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0]
+
+        all_feats = self.dropout(all_feats)
 
         return self.decoder(all_feats)
 
@@ -150,17 +159,19 @@ class SequenceConfig(BaseConfig):
     """Basic snapshot model configuration"""
 
     def get_instance(self, *args, **kwargs) -> Any:
-        def get_enc_ch(conf: ModuleInitConfig | None):
-            """Get encoder model and channels if not None"""
+        def get_mod_ch(conf: ModuleInitConfig | None):
+            """Get module and channels if not None"""
             if conf is None:
                 return None, 0
-            model = MODEL_REGISTRY[conf.type](**conf.args)
+            model = MODEL_REGISTRY[conf.type](**conf.args, dropout=self.dropout)
             return model, model.out_ch
 
-        image_enc, image_ch = get_enc_ch(self.image_enc)
-        scalar_enc, scalar_ch = get_enc_ch(self.scalar_enc)
+        image_enc, image_ch = get_mod_ch(self.image_enc)
+        scalar_enc, scalar_ch = get_mod_ch(self.scalar_enc)
 
         decoder = MODEL_REGISTRY[self.decoder.type](
             in_ch=image_ch + scalar_ch, **self.decoder.args
         )
-        return self._apply_extra(SequencePredictor(image_enc, scalar_enc, decoder))
+        return self._apply_extra(
+            SequencePredictor(image_enc, scalar_enc, decoder, dropout=self.dropout)
+        )
