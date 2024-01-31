@@ -8,7 +8,7 @@ spec:
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 64
+    - replicas: 192
       name: create
       template:
         spec:
@@ -25,11 +25,11 @@ spec:
                 [
                   python3,
                   -u,
-                  /app/database_tools/gen_database.py,
-                  main,
+                  /app/database_tools/replay_sql.py,
+                  create,
                   --workspace=/mnt/storage/converted/new-db,
                   --workers=8,
-                  --pod-offset=192,
+                  --pod-offset=0,
                 ]
               env:
                 - name: DATAPATH
@@ -40,10 +40,10 @@ spec:
                       fieldPath: metadata.name
               resources:
                 requests:
-                  memory: 48Gi
+                  memory: 10Gi
                   cpu: 8000m
                 limits:
-                  memory: 64Gi
+                  memory: 16Gi
                   cpu: 10000m
               volumeMounts:
                 - name: storage
