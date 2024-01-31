@@ -13,7 +13,12 @@ args:
     args:
       database: $ENV:gamedata.db
       filter_query:
-        ["game_length > 6720", "read_success = 1", "parse_success = 1"]
+        [
+          "game_length > 6720",
+          "read_success = 1",
+          "parse_success = 1",
+          "playerAPM > 0",
+        ]
 val_loader:
   type: PYTORCH_V1
   args:

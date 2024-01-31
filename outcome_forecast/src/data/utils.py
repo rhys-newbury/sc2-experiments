@@ -24,7 +24,9 @@ def find_closest_indicies(options: Sequence[int], targets: Sequence[int]):
     tgt_idx = 0
     nearest = torch.full([len(targets)], -1, dtype=torch.int32)
     for idx, (prv, nxt) in enumerate(zip(options, options[1:])):
-        if prv <= targets[tgt_idx] and nxt >= targets[tgt_idx]:
+        if prv > targets[tgt_idx]:  # not inbetween, skip
+            continue
+        if prv <= targets[tgt_idx] <= nxt:
             nearest[tgt_idx] = idx
             tgt_idx += 1
             if tgt_idx == nearest.nelement():

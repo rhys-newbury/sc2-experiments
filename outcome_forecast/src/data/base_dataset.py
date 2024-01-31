@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ class SC2ReplayOutcome(Dataset):
         self.sampler = sampler
         self.features = features
         self.metadata = metadata
+        self.logger = logging.getLogger("replay-dataset")
         if self.features is None or "unit_features" in self.features:
             self.db_handle, self.parser = get_database_and_parser(
                 parse_units=True, parse_minimaps=True
@@ -73,7 +75,7 @@ class SC2ReplayOutcome(Dataset):
     def process_replay(self):
         """Process replay data currently in parser into dictonary of features and game outcome"""
         try:
-            outputs_list = self.parser.sample(0)
+            test_sample: dict[str, Any] = self.parser.sample(0)
         except (RuntimeError, IndexError) as err:
             raise RuntimeError(f"Parse failure for {self.parser.info}") from err
 
@@ -82,15 +84,15 @@ class SC2ReplayOutcome(Dataset):
             self.parser.data.gameStep, self._target_game_loops
         )
 
-        # Determine the features available my running the parser at the first index
-        outputs_list = self.parser.sample(int(sample_indicies[0].item()))
+        if (sample_indicies == -1).all():
+            print(f"No valid samples in {self.parser.info.replayHash}")
 
-        if self.features is not None:
-            outputs_list = {k: [outputs_list[k]] for k in self.features}
-        else:
-            outputs_list = {k: [outputs_list[k]] for k in outputs_list}
+        outputs_list = {
+            k: []
+            for k in (test_sample.keys() if self.features is None else self.features)
+        }
 
-        for idx in sample_indicies[1:]:
+        for idx in sample_indicies:
             if idx == -1:
                 sample = {k: np.zeros_like(outputs_list[k][-1]) for k in outputs_list}
             else:

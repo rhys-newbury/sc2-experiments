@@ -11,14 +11,18 @@ from konductor.data import make_from_init_config
 from src.data.base_dataset import Split
 from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
 from typing_extensions import Annotated
-from konductor.utilities.pbar import LivePbar
+from konductor.utilities.pbar import LivePbar, IntervalPbar
 
 app = typer.Typer()
 
 
-def convert_split(outfolder: Path, dataloader):
+def convert_split(outfolder: Path, dataloader, live: bool):
     """Run conversion and write to outfolder"""
-    with LivePbar(total=len(dataloader), desc=outfolder.stem) as pbar:
+    pbar_type = LivePbar if live else IntervalPbar
+    pbar_kwargs = {"total": len(dataloader), "desc": outfolder.stem}
+    if not live:
+        pbar_kwargs["fraction"] = 0.1
+    with pbar_type(**pbar_kwargs) as pbar:
         for sample in dataloader:
             # Unwrap batch dim and change torch tensor to numpy array
             formatted: dict[str, str | np.ndarray] = {}
@@ -34,6 +38,7 @@ def make_numpy_subset(
     config: Annotated[Path, typer.Option()],
     output: Annotated[Path, typer.Option()],
     workers: Annotated[int, typer.Option()] = 4,
+    live: Annotated[bool, typer.Option(help="Use live pbar")] = False,
 ):
     """
     Make a subfolder dataset of numpy files from configuration
@@ -73,7 +78,7 @@ def make_numpy_subset(
         dataloader = dataset_cfg.get_dataloader(split)
         outsubfolder = output / split.name.lower()
         outsubfolder.mkdir(exist_ok=True)
-        convert_split(outsubfolder, dataloader)
+        convert_split(outsubfolder, dataloader, live)
 
 
 if __name__ == "__main__":
