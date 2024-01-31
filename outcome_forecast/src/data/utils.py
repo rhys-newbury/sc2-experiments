@@ -26,6 +26,8 @@ def find_closest_indicies(options: Sequence[int], targets: Sequence[int]):
     for idx, (prv, nxt) in enumerate(zip(options, options[1:])):
         if prv > targets[tgt_idx]:  # not inbetween, skip
             tgt_idx += 1
+            if tgt_idx == nearest.nelement():
+                break
             continue
         if prv <= targets[tgt_idx] <= nxt:
             nearest[tgt_idx] = idx
