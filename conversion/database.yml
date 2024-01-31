@@ -1,15 +1,15 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: sc2-train1
+  name: sc2-database
 spec:
   maxRetry: 1
   minAvailable: 1
   schedulerName: volcano
   queue: default
   tasks:
-    - replicas: 192
-      name: serialize
+    - replicas: 64
+      name: create
       template:
         spec:
           restartPolicy: Never
@@ -19,14 +19,17 @@ spec:
             runAsUser: 1000
           containers:
             - name: runner
-              image: mu00120825.eng.monash.edu.au:5021/sc2-experiments:latest
+              image: mu00120825.eng.monash.edu.au:5000/sc2-experiments:master
+              imagePullPolicy: Always
               command:
                 [
-                  "python",
-                  "-u",
-                  "/code/sc2-serializer/scripts/gen_database.py",
-                  "--workspace=/mnt/storage",
-                 "--workers=8",
+                  python3,
+                  -u,
+                  /app/database_tools/gen_database.py,
+                  main,
+                  --workspace=/mnt/storage/converted/new-db,
+                  --workers=8,
+                  --pod-offset=192,
                 ]
               env:
                 - name: DATAPATH
@@ -37,16 +40,16 @@ spec:
                       fieldPath: metadata.name
               resources:
                 requests:
-                  memory: 64Gi
+                  memory: 48Gi
                   cpu: 8000m
                 limits:
-                  memory: 100Gi
+                  memory: 64Gi
                   cpu: 10000m
               volumeMounts:
                 - name: storage
                   mountPath: /mnt/storage
-                - mountPath: /dev/shm
-                  name: dshm
+                - name: dshm
+                  mountPath: /dev/shm
           volumes:
             - name: storage
               nfs:
