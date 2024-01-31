@@ -27,8 +27,8 @@ spec:
                 [
                   python,
                   /app/outcome_forecast/train.py,
-                  --workspace=/mnt/storage/sc2-minimap-experiments,
-                  --config-file=/mnt/storage/sc2-minimap-experiments/config/{{ exp_config }}.yml,
+                  --workspace=/mnt/storage/outcome-experiments,
+                  --config-file=/mnt/storage/outcome-experiments/config/{{ exp_config }}.yml,
                   --epoch={{ epochs }},
                   --workers={{ n_worker }},
                 {%- if brief %}
@@ -37,7 +37,7 @@ spec:
                 ]
               env:
                 - name: DATAPATH
-                  value: /mnt/storage/sc2-minimap-subset
+                  value: /mnt/storage/outcome-subset
               resources:
                 requests:
                   memory: {{ mem }}Gi
