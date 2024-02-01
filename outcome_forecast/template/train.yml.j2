@@ -25,7 +25,9 @@ spec:
               imagePullPolicy: Always
               command:
                 [
-                  python,
+                  torchrun,
+                  --standalone,
+                  --nproc_per_node={{ n_gpu }},
                   /app/outcome_forecast/train.py,
                   --workspace=/mnt/storage/outcome-experiments,
                   --config-file=/mnt/storage/outcome-experiments/config/{{ exp_config }}.yml,
