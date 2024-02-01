@@ -17,7 +17,7 @@ args:
           "game_length > 6720",
           "read_success = 1",
           "parse_success = 1",
-          "playerAPM > 0",
+          "playerAPM > 30",
         ]
 val_loader:
   type: PYTORCH_V1

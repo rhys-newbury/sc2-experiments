@@ -15,7 +15,6 @@ VALID_GPUS = [
     "NVIDIA-GeForce-RTX-2080-Ti",
     "NVIDIA-GeForce-RTX-3090",
     "NVIDIA-RTX-A6000",
-    "Quadro-GV100",
     "Tesla-T4",
 ]
 
@@ -31,15 +30,17 @@ def main(
 ):
     """Launch kubernetes job with path to training configuration"""
 
-    template_conf: dict[str, str | int | None] = {"exp_config": exp_config}
-    template_conf["cpu"] = int(input("num cpu (8): ").strip() or "8") * 1000
-    template_conf["mem"] = int(input("memory (Gi) (16): ").strip() or "16")
-    template_conf["n_worker"] = int(input("num workers (8): ").strip() or "8")
-    template_conf["n_gpu"] = int(input("n gpu (1): ").strip() or "1")
+    template_conf: dict[str, str | int] = {
+        "exp_config": exp_config,
+        "registry": os.environ["REGISTRY_URL"],
+    }
+    template_conf["cpu"] = int(input("num cpu (4): ").strip() or "4") * 1000
+    template_conf["mem"] = int(input("memory (Gi) (8): ").strip() or "8")
+    template_conf["n_worker"] = int(input("num workers (4): ").strip() or "4")
+    template_conf["n_gpu"] = int(input("n gpu (0): ").strip() or "0")
     if brief := input("brief (''): "):
         template_conf["brief"] = brief
     template_conf["epochs"] = int(input("epochs: "))
-    template_conf["registry"] = os.environ["REGISTRY_URL"]
     proc = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], check=True, capture_output=True
     )
@@ -48,7 +49,12 @@ def main(
     print("GPU Names Available")
     for idx, name in enumerate(VALID_GPUS):
         print(f"{idx}: {name}")
-    template_conf["gpu_name"] = VALID_GPUS[int(input("Select GPU: "))]
+    try:
+        template_conf["gpu_name"] = VALID_GPUS[
+            int(input("Select GPU (empty to skip): "))
+        ]
+    except ValueError:
+        pass
 
     env = Environment(loader=FileSystemLoader("template/"))
     template = env.get_template(template_name)

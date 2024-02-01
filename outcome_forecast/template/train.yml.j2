@@ -17,15 +17,19 @@ spec:
             - name: dkr-creds
           securityContext:
             runAsUser: 1000
+          {%- if gpu_name %}
           nodeSelector:
             nvidia.com/gpu.product: {{ gpu_name }}
+          {%- endif %}
           containers:
             - name: runner
               image: {{ registry }}/sc2-experiments:{{ git_branch }}
               imagePullPolicy: Always
               command:
                 [
-                  python,
+                  torchrun,
+                  --standalone,
+                  --nproc_per_node={{ [n_gpu, 1] | max }},
                   /app/outcome_forecast/train.py,
                   --workspace=/mnt/storage/outcome-experiments,
                   --config-file=/mnt/storage/outcome-experiments/config/{{ exp_config }}.yml,

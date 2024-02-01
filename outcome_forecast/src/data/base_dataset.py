@@ -94,7 +94,7 @@ class SC2ReplayOutcome(Dataset):
 
         for idx in sample_indicies:
             if idx == -1:
-                sample = {k: np.zeros_like(outputs_list[k][-1]) for k in outputs_list}
+                sample = {k: np.zeros_like(test_sample[k]) for k in outputs_list}
             else:
                 sample = self.parser.sample(int(idx.item()))
             for k in outputs_list:
