@@ -28,9 +28,8 @@ def get_memory_usage(stats) -> float:
 
 def run_stats(ctr: Container, logfile: Path):
     """Watch container stat usage and append to the logfile stem the time taken"""
-    stime = time.time()
     with open(logfile, "w", encoding="utf-8") as f:
-        f.write("CPU[Core],MEM[MB]\n")
+        f.write("Time[sec],CPU[Core],MEM[MB]\n")
 
     stats = ctr.stats(stream=False)
     ctr.reload()
@@ -38,19 +37,18 @@ def run_stats(ctr: Container, logfile: Path):
         cpu = get_cpu_usage(stats)
         mem = get_memory_usage(stats)
         with open(logfile, "a", encoding="utf-8") as f:
-            f.write(f"{cpu},{mem}\n")
+            f.write(f"{time.time()},{cpu},{mem}\n")
         stats = ctr.stats(stream=False)
         ctr.reload()
 
-    duration = time.time() - stime
-
     # Suffix the file with the time taken for conversion
-    new_filename = logfile.with_stem(f"{logfile.stem}_{int(duration)}sec")
+    new_filename = logfile.with_stem(f"{logfile.stem}")
     logfile.rename(new_filename)
 
 
 app = typer.Typer()
 SC2_PATH = Path.home() / "SC2"
+REPLAYS_PATH = Path("/media/bryce/nfs/replays")
 
 
 @app.command()
@@ -60,13 +58,13 @@ def cpp_serializer(results: Path = Path.cwd()):
         "mu00120825.eng.monash.edu.au:5000/sc2-serializer",
         command=[
             "./sc2_converter",
-            "--replays=/data/replays/4.9.2",
+            "--replays=/replays/4.9.2",
             "--partition=/data/parts/4.9.2/evaluation_partition",
             "--output=/data/converted/sc2_evaluation.SC2Replays",
             "--game=/data/game/4.9.2/Versions/",
             "--converter=action",
         ],
-        volumes=[f"{SC2_PATH}:/data"],
+        volumes=[f"{SC2_PATH}:/data", f"{REPLAYS_PATH}:/replays"],
         detach=True,
     )
     run_stats(ctr, results / "sc2-serializer.csv")
@@ -80,7 +78,7 @@ def alphastar(results: Path = Path.cwd()):
         command=[
             "python3",
             "data/generate_dataset.py",
-            "--sc2_replay_path=/data/replays/4.9.2",
+            "--sc2_replay_path=/replays/4.9.2",
             "--converted_path=/data/converted/tfrec",
             "--partition_file=/data/parts/4.9.2/evaluation_partition",
             "--converter_settings=configs/alphastar_supervised_converter_settings.pbtxt",
@@ -88,7 +86,7 @@ def alphastar(results: Path = Path.cwd()):
         ],
         working_dir="/home/worker/alphastar/unplugged",
         environment=["SC2PATH=/data/game/4.9.2"],
-        volumes=[f"{SC2_PATH}:/data"],
+        volumes=[f"{SC2_PATH}:/data", f"{REPLAYS_PATH}:/replays"],
         detach=True,
     )
     run_stats(ctr, results / "alphastar.csv")
@@ -96,20 +94,38 @@ def alphastar(results: Path = Path.cwd()):
 
 @app.command()
 def compare(results: Path = Path.cwd()):
-    cpp_stats = pd.read_csv(next(results.glob("sc2-serializer*.csv")))
-    astar_stats = pd.read_csv(next(results.glob("alphastar*.csv")))
-    for key in ["MEM[MB]", "CPU[Core]"]:
-        plt.plot(cpp_stats[key], label="sc2-serializer")
-        plt.plot(astar_stats[key], label="alphastar")
+    cpp_stats = pd.read_csv(results / "sc2-serializer.csv")
+    astar_stats = pd.read_csv(results / "alphastar.csv")
+    x_key = "Time[sec]"
+    for y_key in ["MEM[MB]", "CPU[Core]"]:
+        plt.plot(
+            cpp_stats[x_key] - cpp_stats[x_key][0],
+            cpp_stats[y_key],
+            label="sc2-serializer",
+        )
+        plt.plot(
+            astar_stats[x_key] - astar_stats[x_key][0],
+            astar_stats[y_key],
+            label="alphastar",
+        )
         plt.suptitle(
-            f"sc2-serializer avg: {cpp_stats[key].mean():.2f}, max: {cpp_stats[key].max():.2f}"
-            f"\nalphastar avg: {astar_stats[key].mean():.2f}, max: {astar_stats[key].max():.2f}"
+            f"sc2-serializer avg: {cpp_stats[y_key].mean():.2f}, max: {cpp_stats[y_key].max():.2f}"
+            f"\nalphastar avg: {astar_stats[y_key].mean():.2f}, max: {astar_stats[y_key].max():.2f}"
         )
         plt.legend()
-        plt.ylabel(key)
-        plt.xlabel("sample index")
-        plt.savefig(f"{key}.png")
+        plt.ylabel(y_key)
+        plt.xlabel(x_key)
+        plt.savefig(f"{y_key}.png")
         plt.close()
+
+
+@app.command()
+def update_time(results: Path = Path.cwd()):
+    for filename in ["sc2-serializer.csv", "alphastar.csv"]:
+        filepath = results / filename
+        stats = pd.read_csv(filepath)
+        stats["Time[sec]"] -= stats["Time[sec]"][0]
+        stats.to_csv(filepath.with_stem(filepath.stem + "_t"))
 
 
 if __name__ == "__main__":
