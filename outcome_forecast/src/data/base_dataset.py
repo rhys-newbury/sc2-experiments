@@ -283,7 +283,9 @@ class DaliFolderDataset(BaseDALIDataset):
         self.files: list[str] = []
 
     def _initialize(self):
-        self.files = [f.name for f in self.folder.iterdir()]
+        file_list = self.folder / f"{self.split.lower()}-list.txt"
+        with open(file_list, "r", encoding="utf-8") as f:
+            self.files = [s.strip() for s in f.readline()]
         return super()._initialize()
 
     def __len__(self) -> int:
