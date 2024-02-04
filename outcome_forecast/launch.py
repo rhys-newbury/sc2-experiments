@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-import subprocess
 import os
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -16,6 +17,20 @@ VALID_GPUS = [
     "NVIDIA-GeForce-RTX-3090",
     "NVIDIA-RTX-A6000",
     "Tesla-T4",
+]
+
+
+@dataclass
+class Dataset:
+    subset: str
+    path: str
+
+
+DATASETS = [
+    Dataset("tournament", "outcome-subset-tournament"),
+    Dataset("492", "outcome-subset-492"),
+    Dataset("tournament", "converted/tournaments"),
+    Dataset("492", "converted/4.9.2"),
 ]
 
 
@@ -55,6 +70,13 @@ def main(
         ]
     except ValueError:
         pass
+
+    print("Datasets (DATAPATH)")
+    for idx, name in enumerate(DATASETS):
+        print(f"{idx}: {name}")
+    dataset = DATASETS[int(input("Select :"))]
+    template_conf["dataset"] = dataset.path
+    template_conf["dataset_type"] = dataset.subset
 
     env = Environment(loader=FileSystemLoader("template/"))
     template = env.get_template(template_name)
