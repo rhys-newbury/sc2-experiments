@@ -8,6 +8,8 @@ from konductor.init import ModuleInitConfig
 from konductor.models import MODEL_REGISTRY, ExperimentInitConfig
 from konductor.models._pytorch import TorchModelConfig
 
+from .transformer import TransformerDecoderV1
+
 
 @dataclass
 class BaseConfig(TorchModelConfig):
@@ -28,6 +30,9 @@ class BaseConfig(TorchModelConfig):
             scalar_enc["args"]["in_ch"] = props["scalar_ch"]
             if scalar_enc["type"] == "scalar-v2":
                 scalar_enc["args"]["timerange"] = props["timepoints"]
+
+        if model_cfg["decoder"]["type"] == "transformer-v1":
+            model_cfg["decoder"]["args"]["max_time"] = props["timepoints"].max
 
         assert image_enc or scalar_enc, "At least Image or Scalar encoder required"
 
@@ -152,7 +157,12 @@ class SequencePredictor(nn.Module):
 
         all_feats = self.dropout(all_feats)
 
-        return self.decoder(all_feats)
+        if isinstance(self.decoder, TransformerDecoderV1):
+            outputs = self.decoder(all_feats, step_data["scalar_features"][..., -1])
+        else:
+            outputs = self.decoder(all_feats)
+
+        return outputs
 
 
 @dataclass
