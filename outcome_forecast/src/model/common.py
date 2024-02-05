@@ -13,6 +13,8 @@ from ..utils import TimeRange
 class ImageEncV1(nn.Module):
     """Simple conv->flatten encoder for images"""
 
+    is_logit_output = True
+
     def __init__(
         self,
         in_ch: int,
@@ -104,6 +106,8 @@ def make_basic_encoder(
 class ScalarEncoderV1(nn.Module):
     """Simple set of linear layers to encode feature vector"""
 
+    is_logit_output = True
+
     def __init__(
         self,
         in_ch: int,
@@ -132,6 +136,8 @@ class ScalarEncoderV2(nn.Module):
     Encoder that tests the game step and either normalizes in a particular range or selects a set of parameters.
     Assuming from sc2_serializer/include/replay_parsing.hpp that gameStep is the last scalar feature.
     """
+
+    is_logit_output = True
 
     class Strategy(enum.Enum):
         """

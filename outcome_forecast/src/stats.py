@@ -1,12 +1,14 @@
 """
 Statistics for game outcome prediction
 """
+
 from dataclasses import dataclass
 from typing import Sequence
 
 import torch
 from torch import Tensor
 from konductor.data import get_dataset_properties
+from konductor.models import get_model
 from konductor.init import ExperimentInitConfig
 from konductor.metadata.base_statistic import Statistic, STATISTICS_REGISTRY
 
@@ -47,10 +49,12 @@ class BinaryAcc(Statistic):
             timepoints = data_cfg["timepoints"].arange()
         else:
             timepoints = None
-        return cls(timepoints=timepoints, **extras)
+        model = get_model(cfg)
+        should_sigmoid = model.is_logit_output
+        return cls(timepoints=timepoints, should_sigmoid=should_sigmoid, **extras)
 
     def __init__(
-        self, timepoints: Sequence[int] | None = None, auc_thresholds: int = 100
+        self, should_sigmoid: bool = True, timepoints: Sequence[int] | None = None
     ) -> None:
         """Initialize the win prediciton statistics calculator
 
@@ -60,6 +64,7 @@ class BinaryAcc(Statistic):
             defaults to every 2min up to 30min.
         """
         self.timepoints = torch.arange(2, 32, 2) if timepoints is None else timepoints
+        self.should_sigmoid = should_sigmoid
 
     def get_keys(self) -> list[str]:
         return [f"binary_acc_{t}" for t in self.timepoints]
@@ -78,11 +83,12 @@ class BinaryAcc(Statistic):
             dict[str, float]: Dictionary of Binary Accuracy at each timepoint
             (until end of replay)
         """
+        pred = torch.sigmoid(predictions) if self.should_sigmoid else predictions
+
         result: dict[str, float] = {}
-        pred_sig = torch.sigmoid(predictions)
         for idx, key in enumerate(self.get_keys()):
             res = self.calculate_binary_accuracy(
-                pred_sig[:, idx], targets["win"], targets["valid"][:, idx]
+                pred[:, idx], targets["win"], targets["valid"][:, idx]
             )
             result[key] = res
         return result
@@ -126,13 +132,18 @@ class WinAUC(Statistic):
             timepoints = data_cfg["timepoints"].arange()
         else:
             timepoints = None
-        return cls(timepoints=timepoints, **extras)
+        model = get_model(cfg)
+        should_sigmoid = model.is_logit_output
+        return cls(timepoints=timepoints, should_sigmoid=should_sigmoid, **extras)
 
     def get_keys(self) -> list[str]:
         return [f"auc_{t}" for t in self.timepoints]
 
     def __init__(
-        self, timepoints: Sequence[int] | None = None, auc_thresholds: int = 100
+        self,
+        should_sigmoid: bool = True,
+        timepoints: Sequence[int] | None = None,
+        auc_thresholds: int = 100,
     ) -> None:
         """Initialize the win prediciton statistics calculator
 
@@ -143,6 +154,7 @@ class WinAUC(Statistic):
         """
         self.timepoints = torch.arange(2, 32, 2) if timepoints is None else timepoints
         self.auc_thresholds = self.make_thresholds(auc_thresholds)
+        self.should_sigmoid = should_sigmoid
 
     @staticmethod
     def make_thresholds(count) -> Tensor:
@@ -224,7 +236,7 @@ class WinAUC(Statistic):
             dict[str, float]: Dictionary of AUC at each timepoint (until end of replay)
         """
         result: dict[str, float] = {}
-        pred_sig = torch.sigmoid(predictions)
+        pred_sig = torch.sigmoid(predictions) if self.should_sigmoid else predictions
         for idx, key in enumerate(self.get_keys()):
             res = self.calculate_auc(
                 pred_sig[:, idx], targets["win"], targets["valid"][:, idx]

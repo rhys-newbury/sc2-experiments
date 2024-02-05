@@ -1,0 +1,44 @@
+dataset:
+  - type: dali-folder
+    args:
+      keys: [win, valid, minimap_features, scalar_features]
+    val_loader:
+      type: PYTORCH_V1
+      args:
+        batch_size: 128
+        drop_last: true
+    train_loader:
+      type: PYTORCH_V1
+      args:
+        shuffle: true
+        batch_size: 64
+        drop_last: true
+criterion:
+  - type: win-bce
+    args: {}
+model:
+  - type: sequence-prediction
+    args:
+      image_enc:
+        type: image-v1
+        args: {}
+      scalar_enc:
+        type: scalar-v2
+        args:
+          strategy: batch_norm
+      decoder:
+        type: lstm-v1
+        args: {}
+    optimizer:
+      type: adamw
+      args:
+        step_interval: 1
+        lr: 1.e-5
+        gradient_clipping: 0.01
+      scheduler:
+        type: poly
+        args:
+          max_iter: 5
+          power: 0.9
+logger:
+  interval: 500

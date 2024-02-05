@@ -190,7 +190,7 @@ class SC2ReplayConfig(DatasetConfig):
             case Split.TRAIN:
                 return self.train_loader.get_instance(dataset)
             case Split.VAL | Split.TEST:
-                return self.train_loader.get_instance(dataset)
+                return self.val_loader.get_instance(dataset)
             case _:
                 raise RuntimeError(f"How did I get here with {split=}")
 
@@ -256,7 +256,7 @@ class FolderDatasetConfig(DatasetConfig):
             case Split.TRAIN:
                 return self.train_loader.get_instance(dataset)
             case Split.VAL | Split.TEST:
-                return self.train_loader.get_instance(dataset)
+                return self.val_loader.get_instance(dataset)
             case _:
                 raise RuntimeError(f"How did I get here with {split=}")
 

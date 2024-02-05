@@ -5,22 +5,8 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Convert",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/conversion/convert_subfolders.py",
-            "console": "integratedTerminal",
-            "justMyCode": true,
-            "args": [
-                "--converter=C:\\Users\\frenz\\source\\repos\\5had3z\\sc2-serializer\\build\\Release\\sc2_converter.exe",
-                "--game=E:\\Blizzard\\StarCraft II\\Versions",
-                "--outfolder=E:\\SC2Conversion\\Converted",
-                "--replays=E:\\SC2Conversion\\Replays"
-            ]
-        },
-        {
             "name": "Train",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/outcome_forecast/train.py",
             "console": "integratedTerminal",
@@ -29,11 +15,12 @@
             "args": [
                 "--workspace=workspace",
                 "--epoch=10",
-                "--config-file=cfg/base.yml",
+                "--config-file=cfg/train-numpy.yml",
                 "--pbar",
                 "--brief=testing this",
-                "--workers=4"
-            ]
-        }
+                "--workers=6"
+            ],
+            "envFile": "${workspaceFolder}/.env"
+        },
     ]
 }

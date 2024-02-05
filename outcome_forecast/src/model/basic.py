@@ -57,6 +57,7 @@ class SnapshotPredictor(nn.Module):
         self.scalar_enc = scalar_enc
         self.decoder = decoder
         self.dropout = nn.Dropout(dropout)
+        self.is_logit_output = self.decoder.is_logit_output
 
     def forward(self, step_data: dict[str, Tensor]) -> Tensor:
         """Step data features should be [B,T,...]"""
@@ -126,6 +127,7 @@ class SequencePredictor(nn.Module):
         self.scalar_enc = scalar_enc
         self.decoder = decoder
         self.dropout = nn.Dropout(dropout)
+        self.is_logit_output = self.decoder.is_logit_output
 
     def forward(self, step_data: dict[str, Tensor]) -> Tensor:
         """"""
