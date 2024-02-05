@@ -5,7 +5,7 @@ from konductor.models import MODEL_REGISTRY
 
 @MODEL_REGISTRY.register_module("lstm-v1")
 class LSTMDecoderV1(nn.Module):
-    def __init__(self, in_ch: int, hidden_size: int, num_layers: int):
+    def __init__(self, in_ch: int, hidden_size: int = 32, num_layers: int = 2):
         super().__init__()
         self.latent = nn.LSTM(
             input_size=in_ch,

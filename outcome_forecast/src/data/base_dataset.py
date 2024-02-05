@@ -339,7 +339,7 @@ class FeatureType:
     ndim: int
 
 
-@pipeline_def(py_start_method="spawn")
+@pipeline_def(py_start_method="spawn", prefetch_queue_depth=3)
 def folder_pipeline(
     shard_id: int,
     num_shards: int,
