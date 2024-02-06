@@ -3,10 +3,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from zipfile import BadZipFile
+from konductor.init import ExperimentInitConfig
 
 import numpy as np
 from nvidia.dali import fn
 from nvidia.dali.types import SampleInfo, DALIDataType
+from nvidia.dali.data_node import DataNode
 from nvidia.dali.pipeline import pipeline_def, Pipeline
 import torch
 import yaml
@@ -310,6 +312,13 @@ class DaliFolderDatasetConfig(FolderDatasetConfig):
     train_loader: DaliLoaderConfig
     val_loader: DaliLoaderConfig
     keys: list[str]  # List of items to read
+    fp16_out: bool = False
+
+    @classmethod
+    def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
+        if "amp" in config.trainer:
+            config.data[idx].dataset.args["fp16_out"] = True
+        return super().from_config(config, idx)
 
     def _get_size(self, split: Split, **kwargs):
         inst = DaliFolderDataset(
@@ -327,7 +336,11 @@ class DaliFolderDatasetConfig(FolderDatasetConfig):
     def get_dataloader(self, split: Split) -> Any:
         loader = self.train_loader if split is Split.TRAIN else self.val_loader
         pipeline = folder_pipeline(
-            path=self.basepath, split=split, keys=self.keys, **loader.pipe_kwargs()
+            path=self.basepath,
+            split=split,
+            keys=self.keys,
+            fp16_out=self.fp16_out,
+            **loader.pipe_kwargs(),
         )
         size = self._get_size(split, **loader.pipe_kwargs())
         return loader.get_instance(pipeline, out_map=self.keys, size=size)
@@ -347,6 +360,7 @@ def folder_pipeline(
     path: Path,
     split: Split,
     keys: list[str],
+    fp16_out: bool,
     augmentations: list[ModuleInitConfig],
 ):
     """Create pipeline"""
@@ -369,4 +383,12 @@ def folder_pipeline(
         dtype=[dtypes[k].dtype for k in keys],
         ndim=[dtypes[k].ndim for k in keys],
     )
-    return tuple(o.gpu() for o in outputs)
+
+    def transform(data: DataNode, key: str):
+        """Move data to gpu and cast to fp16 if enabled"""
+        data = data.gpu()
+        if dtypes[key].dtype == DALIDataType.FLOAT and fp16_out:
+            return fn.cast(data, dtype=DALIDataType.FLOAT16)
+        return data
+
+    return tuple(transform(o, k) for o, k in zip(outputs, keys))
