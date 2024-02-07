@@ -202,8 +202,9 @@ class ScalarEncoderV2(nn.Module):
             timestep = inputs[0, -1] / (22.4 * 60)
             mod_idx = int(torch.argmin((timestep - self.timerange).abs()))
 
-        norm_idx = mod_idx if len(self.batch_norms) > 1 else 0
-        norm_feats = self.batch_norms[norm_idx](inputs[..., :-1])
+        with torch.autocast("cuda", enabled=False):
+            norm_idx = mod_idx if len(self.batch_norms) > 1 else 0
+            norm_feats = self.batch_norms[norm_idx](inputs[..., :-1])
 
         params_idx = mod_idx if len(self.encoders) > 1 else 0
         feats = self.encoders[params_idx](norm_feats)

@@ -3,12 +3,12 @@ dataset:
     args:
       keys: [win, valid, minimap_features, scalar_features]
     val_loader:
-      type: PYTORCH_V1
+      type: DALI
       args:
         batch_size: 128
         drop_last: true
     train_loader:
-      type: PYTORCH_V1
+      type: DALI
       args:
         shuffle: true
         batch_size: 64
@@ -27,7 +27,7 @@ model:
         args:
           strategy: batch_norm
       decoder:
-        type: lstm-v1
+        type: transformer-v1
         args: {}
     optimizer:
       type: adamw
@@ -42,3 +42,5 @@ model:
           power: 0.9
 logger:
   interval: 500
+trainer:
+  amp: {}

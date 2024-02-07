@@ -350,6 +350,8 @@ class DaliFolderDatasetConfig(FolderDatasetConfig):
 class FeatureType:
     dtype: DALIDataType
     ndim: int
+    layout: str
+    should_cast: bool
 
 
 @pipeline_def(py_start_method="spawn", prefetch_queue_depth=2)
@@ -367,11 +369,11 @@ def folder_pipeline(
     pipe = Pipeline.current()
 
     dtypes = {
-        "win": FeatureType(DALIDataType.FLOAT, 0),
-        "valid": FeatureType(DALIDataType.BOOL, 1),
-        "metadata": FeatureType(DALIDataType.STRING, 1),
-        "scalar_features": FeatureType(DALIDataType.FLOAT, 2),
-        "minimap_features": FeatureType(DALIDataType.FLOAT, 4),
+        "win": FeatureType(DALIDataType.FLOAT, 0, "", False),
+        "valid": FeatureType(DALIDataType.BOOL, 1, "", False),
+        "metadata": FeatureType(DALIDataType.STRING, 1, "", False),
+        "scalar_features": FeatureType(DALIDataType.FLOAT, 2, "", False),
+        "minimap_features": FeatureType(DALIDataType.FLOAT, 4, "FCHW", True),
     }
     outputs = fn.external_source(
         source=DaliFolderDataset(
@@ -387,7 +389,11 @@ def folder_pipeline(
     def transform(data: DataNode, key: str):
         """Move data to gpu and cast to fp16 if enabled"""
         data = data.gpu()
-        if dtypes[key].dtype == DALIDataType.FLOAT and fp16_out:
+        if (
+            dtypes[key].dtype == DALIDataType.FLOAT
+            and dtypes[key].should_cast
+            and fp16_out
+        ):
             return fn.cast(data, dtype=DALIDataType.FLOAT16)
         return data
 
