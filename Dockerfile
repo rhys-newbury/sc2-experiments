@@ -27,4 +27,8 @@ WORKDIR /app
 RUN mkdir database_tools && cd database_tools && \
     wget https://raw.githubusercontent.com/5had3z/sc2-serializer/main/scripts/replay_sql.py
 
+ARG COMMIT
+RUN [ ! -z "${COMMIT}" ]
+ENV COMMIT_SHA=${COMMIT}
+
 COPY . .
