@@ -40,5 +40,5 @@ class LSTMDecoderV1(nn.Module):
         out, _ = self.latent(inputs, (h, c))
         if self.residule_add:
             out = out + self.residule_squeeze(inputs)
-        outputs = self.decode(out)
+        outputs: Tensor = self.decode(out)
         return outputs.squeeze(-1)

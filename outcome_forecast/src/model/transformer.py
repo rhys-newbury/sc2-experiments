@@ -16,6 +16,7 @@ class TransformerDecoderV1(nn.Module):
         num_head: int = 4,
         num_time_freq: int = 8,
         max_time_freq: int = 8,
+        residule_add: bool = False,
     ):
         """Max time in minutes, will be converted internally to gameloops"""
         super().__init__()
@@ -36,6 +37,9 @@ class TransformerDecoderV1(nn.Module):
 
         self.mask: Tensor
         self.register_buffer("mask", torch.empty([1]), persistent=False)
+        self.residule_add = residule_add
+        if residule_add:
+            self.residule_linear = nn.Linear(in_ch, hidden_size + self.num_freq * 2)
 
     @torch.no_grad()
     def create_time_embeddings(self, timepoints: Tensor):
@@ -62,8 +66,13 @@ class TransformerDecoderV1(nn.Module):
         """Input is a [B, T, C] tensor, timesteps is [B, T] in gamestep units, returns [B, T]"""
         time_embed = self.create_time_embeddings(timesteps)
         cat_features = torch.cat([self.squeeze(inputs), time_embed], dim=-1)
+
         temporal_enc: Tensor = self.temporal_encoder(
             cat_features, mask=self.get_mask(cat_features.shape[1]), is_causal=True
         )
+
+        if self.residule_add:
+            temporal_enc = temporal_enc + self.residule_linear(inputs)
+
         decoded: Tensor = self.decode(temporal_enc)
         return decoded.squeeze(-1)
