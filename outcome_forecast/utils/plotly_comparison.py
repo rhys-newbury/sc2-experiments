@@ -7,7 +7,9 @@ import plotly.graph_objects as go
 from dash import Input, Output, callback, dcc, html
 from dash.exceptions import PreventUpdate
 from konductor.metadata.database.sqlite import SQLiteDB, DEFAULT_FILENAME
-from .xgboost_result import d as xgboost_results
+from .xgboost_tourn import d as xgboost_tourn
+from .xgboost_492 import d as xgboost_492
+
 from typing import List
 
 _WAYPOINT_COL_RE = re.compile(r"\b[a-zA-Z]+_\d+\b")
@@ -100,7 +102,8 @@ def update_col_graph(metric: str, root: str):
 
     df = get_performance_data(Path(root), metric)
 
-    df.append(("xgboost", xgboost_results.get(float(metric), 0)))
+    df.append(("xgboost_tournament", xgboost_tourn.get(float(metric), 0)))
+    df.append(("xgboost_492", xgboost_492.get(float(metric), 0)))
 
     fig = go.Figure()
     column_names, values = zip(*df)
@@ -138,9 +141,13 @@ def update_line_graph(root: str):
     legend_names = [d[0] for d in df]
     data = [d[1:] for d in df]
 
-    xgboost_data = [xgboost_results.get(tp.as_float(), 0) for tp in time_points]
+    xgboost_data = [xgboost_tourn.get(tp.as_float(), 0) for tp in time_points]
     data.append(xgboost_data)
-    legend_names.append("xgboost")
+    legend_names.append("xgboost_tourn")
+
+    xgboost_492_data = [xgboost_492.get(tp.as_float(), 0) for tp in time_points]
+    data.append(xgboost_492_data)
+    legend_names.append("xgboost_492")
 
     hb_map = hash_to_brief(Path(root))
 
