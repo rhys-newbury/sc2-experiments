@@ -99,6 +99,11 @@ def evaluate(
     os.environ["DATAPATH"] = str(datapath)
 
     exp_config = ExperimentInitConfig.from_run(run_path)
+
+    # AMP isn't enabled during eval
+    if "amp" in exp_config.trainer:
+        del exp_config.trainer["amp"]
+
     model: nn.Module = get_model(exp_config)
     ckpt = torch.load(run_path / "latest.pt")["model"]
     model.load_state_dict(ckpt)

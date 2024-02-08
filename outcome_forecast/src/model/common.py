@@ -73,6 +73,62 @@ class ImageEncV1(nn.Module):
         return x
 
 
+@MODEL_REGISTRY.register_module("image-fpn")
+class ImageFPN(nn.Module):
+    def __init__(
+        self,
+        in_ch: int,
+        output_lvl: int,
+        hidden_chs: list[int],
+        strides: list[int],
+        paddings: list[int],
+    ) -> None:
+        super().__init__()
+        self.in_ch = in_ch
+
+        self.enc = nn.ModuleList()
+        chs = [in_ch] + hidden_chs
+        for in_ch, out_ch, stride, padding in zip(chs[:-1], chs[1:], strides, paddings):
+            self.enc.append(ImageFPN.make_conv(in_ch, out_ch, stride, padding))
+
+        self.output_chs = hidden_chs[-output_lvl:]
+        self.output_idx = len(self.enc) - output_lvl
+
+    @staticmethod
+    def make_conv(in_ch, out_ch, stride, padding):
+        return nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, stride, padding),
+            nn.BatchNorm2d(in_ch),
+            nn.ReLU(),
+        )
+
+    def forward(self, inputs: Tensor) -> list[Tensor]:
+        if inputs.ndim == 5:
+            b, t, c, h, w = inputs.shape
+            feat = inputs.reshape(b, t * c, h, w)
+        else:
+            feat = inputs
+
+        out: list[Tensor] = []
+        for idx, mod in enumerate(self.enc):
+            feat = mod(feat)
+            if idx > self.output_idx:
+                out.append(feat)
+
+        return out
+
+
+@MODEL_REGISTRY.register_module("image-fpn-3d")
+class ImageFPN3d(nn.Module):
+    def __init__(self, in_ch: int, ch_2d: list[int], ch_3d: list[int]) -> None:
+        super().__init__()
+        self.in_ch = in_ch
+
+    def forward(self, inputs: Tensor) -> list[Tensor]:
+        return [inputs]
+
+
+@MODEL_REGISTRY.register_module("psp-layer")
 def make_basic_encoder(
     in_ch: int,
     hidden_ch: int,

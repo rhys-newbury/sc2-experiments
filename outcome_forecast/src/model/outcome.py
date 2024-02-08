@@ -46,6 +46,24 @@ class BaseConfig(TorchModelConfig):
         if isinstance(self.decoder, dict):
             self.decoder = ModuleInitConfig(**self.decoder)
 
+    def _get_modules(self):
+        """Construct and return image encoder, scalar encoder and decoder modules"""
+
+        def get_mod_ch(conf: ModuleInitConfig | None):
+            """Get module and channels if not None"""
+            if conf is None:
+                return None, 0
+            model = MODEL_REGISTRY[conf.type](**conf.args, dropout=self.dropout)
+            return model, model.out_ch
+
+        image_enc, image_ch = get_mod_ch(self.image_enc)
+        scalar_enc, scalar_ch = get_mod_ch(self.scalar_enc)
+
+        decoder = MODEL_REGISTRY[self.decoder.type](
+            in_ch=image_ch + scalar_ch, **self.decoder.args
+        )
+        return image_enc, scalar_enc, decoder
+
 
 class SnapshotPredictor(nn.Module):
     """Make basic prediction of game outcome based on single snapshot observation"""
@@ -96,22 +114,8 @@ class SnapshotConfig(BaseConfig):
     """Basic snapshot model configuration"""
 
     def get_instance(self, *args, **kwargs) -> Any:
-        def get_mod_ch(conf: ModuleInitConfig | None):
-            """Get module and channels if not None"""
-            if conf is None:
-                return None, 0
-            model = MODEL_REGISTRY[conf.type](**conf.args, dropout=self.dropout)
-            return model, model.out_ch
-
-        image_enc, image_ch = get_mod_ch(self.image_enc)
-        scalar_enc, scalar_ch = get_mod_ch(self.scalar_enc)
-
-        decoder = MODEL_REGISTRY[self.decoder.type](
-            in_ch=image_ch + scalar_ch, **self.decoder.args
-        )
-        return self._apply_extra(
-            SnapshotPredictor(image_enc, scalar_enc, decoder, self.dropout)
-        )
+        image_enc, scalar_enc, decoder = self._get_modules()
+        return SnapshotPredictor(image_enc, scalar_enc, decoder, self.dropout)
 
 
 class SequencePredictor(nn.Module):
@@ -171,19 +175,5 @@ class SequenceConfig(BaseConfig):
     """Basic snapshot model configuration"""
 
     def get_instance(self, *args, **kwargs) -> Any:
-        def get_mod_ch(conf: ModuleInitConfig | None):
-            """Get module and channels if not None"""
-            if conf is None:
-                return None, 0
-            model = MODEL_REGISTRY[conf.type](**conf.args, dropout=self.dropout)
-            return model, model.out_ch
-
-        image_enc, image_ch = get_mod_ch(self.image_enc)
-        scalar_enc, scalar_ch = get_mod_ch(self.scalar_enc)
-
-        decoder = MODEL_REGISTRY[self.decoder.type](
-            in_ch=image_ch + scalar_ch, **self.decoder.args
-        )
-        return self._apply_extra(
-            SequencePredictor(image_enc, scalar_enc, decoder, dropout=self.dropout)
-        )
+        image_enc, scalar_enc, decoder = self._get_modules()
+        return SequencePredictor(image_enc, scalar_enc, decoder, dropout=self.dropout)
