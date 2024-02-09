@@ -5,11 +5,9 @@ from typing import Any, Dict, Tuple, Optional
 
 import torch
 import typer
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 from typing_extensions import Annotated
 
-from sc2_replay_reader import Score
 from summaryStats import SQL_TYPES, LambdaFunctionType, SC2Replay
 
 app = typer.Typer()
@@ -52,9 +50,9 @@ def make_database(
     # Create a table with the specified headings and data types
     create_table_sql = f"""
         CREATE TABLE game_data (
-            {', '.join(f"{column} {datatype}" for column, datatype in additional_columns.items())},
-            {', '.join(f"{column} {datatype}" for column, datatype in features.items())},
-            {', '.join(f"{column} {datatype}" for column, (datatype, _) in lambda_columns.items())}
+            {', '.join(f"{c} {dt}" for c, dt in additional_columns.items())},
+            {', '.join(f"{c} {dt}" for c, dt in features.items())},
+            {', '.join(f"{c} {dt}" for c, (dt, _) in lambda_columns.items())}
         )
     """
     cursor.execute(create_table_sql)
@@ -105,38 +103,27 @@ def main(
         "playerResult": "TEXT",
     }
     # Manually include additional columns
-    additional_columns: Dict[str, SQL_TYPES] = {}
-
-    all_attributes = [
-        attr
-        for attr in dir(Score)
-        if not callable(getattr(Score, attr))
-        if "__" not in attr
-    ]
-
     lambda_columns: Dict[str, Tuple[SQL_TYPES, LambdaFunctionType]] = {
         "score": ("TEXT", lambda y: y.data.score),
         "gameStep": ("TEXT", lambda y: y.data.gameStep),
     }
 
-    files = Path(os.environ["DATAPATH"]) if replay is None else replay
     dataset = SC2Replay(replay, set(features.keys()), lambda_columns)
 
-    batch_size = 50
     scores_1 = []
     scores_0 = []
     for idx, d in tqdm(enumerate(dataset), total=len(dataset)):
         if d["playerResult"] == 1:
             scores_1.append(
                 [
-                    str(x.killed_value_units) + ";" + str(gs)
+                    str(x.score_float) + ";" + str(gs)
                     for x, gs in zip(d["score"], d["gameStep"])
                 ]
             )
         if d["playerResult"] == 0:
             scores_0.append(
                 [
-                    str(x.killed_value_units) + ";" + str(gs)
+                    str(x.score_float) + ";" + str(gs)
                     for x, gs in zip(d["score"], d["gameStep"])
                 ]
             )

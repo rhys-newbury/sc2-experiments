@@ -11,12 +11,13 @@ from sc2_replay_reader import Result
 #     [0, 1, 2, 4, 5, 6, 76]
 # ]
 
-file_name = "output"
+file_name = "killed_value_units"
 print(int(Result.Win))
 input()
 data0 = []
-file_path = f"{file_name}0.scores"
-
+file_path = f"/home/taco/Desktop/{file_name}0.scores"
+min_x = None
+max_x = None
 with open(file_path, "r") as file:
     for line in tqdm(file, desc="Reading lines", unit=" lines"):
         data0.append(
@@ -30,9 +31,26 @@ with open(file_path, "r") as file:
                 if x.strip() != ""
             ]
         )
+        if len(data0[-1]) == 0:
+            continue
+
+        if min_x is None:
+            min_x = min([x[1] for x in data0[-1]])
+        else:
+            # print("min_x: ", min_x)
+            min_x = min([x[1] for x in data0[-1]] + [min_x])
+
+        if max_x is None:
+            max_x = max([x[1] for x in data0[-1]])
+        else:
+            max_x = max([x[1] for x in data0[-1]] + [max_x])
+        data0 = []
+
+print(min_x, max_x)
+input()
 
 # Assuming f"{file_name}0.scores" is in the current working directory
-file_path = f"{file_name}1.scores"
+file_path = f"/home/taco/Desktop/{file_name}1.scores"
 data1 = []
 with open(file_path, "r") as file:
     for line in tqdm(file, desc="Reading lines", unit=" lines"):
