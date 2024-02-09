@@ -111,9 +111,9 @@ class ConvForecaster(nn.Module):
 
         stacked_feats = torch.stack(minimap_low, dim=2)
         temporal_feats = self.temporal_conv(stacked_feats)
-        temporal_feats = F.upsample(
+        temporal_feats = F.interpolate(
             temporal_feats.squeeze(2),
-            minimap_high[-1].shape[-2:],
+            size=minimap_high[-1].shape[-2:],
             mode="bilinear",
             align_corners=True,
         )
