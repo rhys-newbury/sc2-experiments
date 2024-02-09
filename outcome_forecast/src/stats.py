@@ -54,7 +54,10 @@ class BinaryAcc(Statistic):
         return cls(timepoints=timepoints, should_sigmoid=should_sigmoid, **extras)
 
     def __init__(
-        self, should_sigmoid: bool = True, timepoints: Sequence[int] | None = None
+        self,
+        should_sigmoid: bool = True,
+        timepoints: Sequence[int] | None = None,
+        keep_batch: bool = False,
     ) -> None:
         """Initialize the win prediciton statistics calculator
 
@@ -65,6 +68,7 @@ class BinaryAcc(Statistic):
         """
         self.timepoints = torch.arange(2, 32, 2) if timepoints is None else timepoints
         self.should_sigmoid = should_sigmoid
+        self.keep_batch = keep_batch
 
     def get_keys(self) -> list[str]:
         return [f"binary_acc_{t}" for t in self.timepoints]
@@ -88,14 +92,14 @@ class BinaryAcc(Statistic):
         result: dict[str, float] = {}
         for idx, key in enumerate(self.get_keys()):
             res = self.calculate_binary_accuracy(
-                pred[:, idx], targets["win"], targets["valid"][:, idx]
+                pred[:, idx], targets["win"], targets["valid"][:, idx], self.keep_batch
             )
             result[key] = res
         return result
 
     @staticmethod
     def calculate_binary_accuracy(
-        predictions: Tensor, targets: Tensor, valid_mask: Tensor
+        predictions: Tensor, targets: Tensor, valid_mask: Tensor, keep_batch: bool
     ) -> float:
         """Calculate binary accuracy considering the valid mask
 
@@ -107,16 +111,37 @@ class BinaryAcc(Statistic):
         Returns:
             float: Binary accuracy
         """
-        valid_predictions = predictions[valid_mask] > 0.5
-        valid_targets = targets[valid_mask].bool()
 
-        correct_predictions = (valid_predictions == valid_targets).sum().item()
+        if predictions.dim() == 1:
+            valid_predictions = predictions > 0.5
+            valid_targets = targets.bool()
+            correct_predictions = valid_predictions == valid_targets
+
+        else:
+            valid_predictions = predictions[valid_mask] > 0.5
+            valid_targets = targets[valid_mask].bool()
+            dim = tuple(range(int(keep_batch), valid_predictions.dim()))
+            correct_predictions = (valid_predictions == valid_targets).sum(dim)
+
         total_valid_samples = valid_mask.sum().item()
 
+        if not keep_batch:
+            correct_predictions = correct_predictions.item()
+
         if total_valid_samples > 0:
-            accuracy = correct_predictions / total_valid_samples
+            if keep_batch:
+                accuracy = correct_predictions
+            else:
+                accuracy = correct_predictions / total_valid_samples
         else:
-            accuracy = 0.0  # Handle the case when there are no valid samples
+            if keep_batch:
+                accuracy = torch.zeros(
+                    correct_predictions.shape,
+                    dtype=torch.bool,
+                    device=predictions.device,
+                )
+            else:
+                accuracy = 0.0  # Handle the case when there are no valid samples
 
         return accuracy
 

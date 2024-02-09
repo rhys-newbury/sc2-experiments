@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from zipfile import BadZipFile
-from konductor.init import ExperimentInitConfig
 
 import numpy as np
 from nvidia.dali import fn
@@ -75,13 +74,14 @@ class SC2ReplayOutcome(Dataset):
         return len(self.sampler)
 
     def process_replay(self):
-        """Process replay data currently in parser into dictonary of features and game outcome"""
+        """Process replay data currently in parser into dictionary of
+        features and game outcome"""
         try:
             test_sample: dict[str, Any] = self.parser.sample(0)
         except (RuntimeError, IndexError) as err:
             raise RuntimeError(f"Parse failure for {self.parser.info}") from err
 
-        # Find the indicies to sample at based on recorded gamesteps
+        # Find the indices to sample at based on recorded gamesteps
         sample_indicies = find_closest_indicies(
             self.parser.data.gameStep, self._target_game_loops
         )
@@ -299,7 +299,16 @@ class DaliFolderDataset(BaseDALIDataset):
         data = np.load(self.folder / self.files[sample_idx], allow_pickle=True)
 
         try:
-            out_data = tuple(data[k] for k in self.keys)
+            out_data = tuple(
+                (
+                    np.array(
+                        [ord(c) for c in data["metadata"].tolist()], dtype=np.uint8
+                    )
+                    if k == "metadata"
+                    else data[k]
+                )
+                for k in self.keys
+            )
         except BadZipFile as e:
             raise RuntimeError(f"Got bad data from {self.files[sample_idx]}") from e
 
@@ -371,7 +380,7 @@ def folder_pipeline(
     dtypes = {
         "win": FeatureType(DALIDataType.FLOAT, 0, "", False),
         "valid": FeatureType(DALIDataType.BOOL, 1, "", False),
-        "metadata": FeatureType(DALIDataType.STRING, 1, "", False),
+        "metadata": FeatureType(DALIDataType.UINT8, 1, "", False),
         "scalar_features": FeatureType(DALIDataType.FLOAT, 2, "", False),
         "minimap_features": FeatureType(DALIDataType.FLOAT, 4, "FCHW", True),
     }
@@ -395,6 +404,8 @@ def folder_pipeline(
             and fp16_out
         ):
             return fn.cast(data, dtype=DALIDataType.FLOAT16)
+        if key == "metadata":
+            return fn.pad(data, fill_value=0)
         return data
 
     return tuple(transform(o, k) for o, k in zip(outputs, keys))

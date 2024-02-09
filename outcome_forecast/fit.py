@@ -17,6 +17,8 @@ from src.data.replay_sampler import Split, SQLSampler
 from src.utils import TimeRange
 from torch.utils.data import DataLoader
 from typing_extensions import Annotated
+from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
+from konductor.utilities.pbar import LivePbar, IntervalPbar
 
 try:
     import xgboost
@@ -66,6 +68,7 @@ def fit_model(
     tmp_workspace: Annotated[Path, typer.Option()] = Path("./processed_data"),
     save_plots: Annotated[bool, typer.Option()] = True,
     workers: Annotated[int, typer.Option()] = 8,
+    liveProgress: Annotated[bool, typer.Option()] = True,
 ):
     assert yaml_config.exists()
     with yaml_config.open(mode="r") as file:
@@ -91,35 +94,36 @@ def fit_model(
                 os.remove(file)
                 os.remove(wins)
 
-        t2 = timeit.default_timer()
-        # process and save as numpy files
-        for idx, sample in enumerate(dataloader):
-            print(idx)
-            print(f"Took {timeit.default_timer() - t2}s")
-            t2 = timeit.default_timer()
+        pbar_type = LivePbar if liveProgress else IntervalPbar
+        pbar_kwargs = {"total": len(dataloader) * len(time), "desc": "recreate"}
+        if not liveProgress:
+            pbar_kwargs["fraction"] = 0.1
+        with pbar_type(**pbar_kwargs) as pbar:
+            for sample in dataloader:
+                for time_step, current_time in enumerate(time.arange()):
+                    file = tmp_workspace / f"{time_step}_x.npy"
+                    wins = tmp_workspace / f"{time_step}_y.npy"
+                    mask_ = sample["valid"][:, time_step]
+                    x = sample["scalar_features"][:, time_step, :][mask_, :]
+                    y = sample["win"][mask_]
 
-            for time_step, current_time in enumerate(time.arange()):
-                file = tmp_workspace / f"{time_step}_x.npy"
-                wins = tmp_workspace / f"{time_step}_y.npy"
+                    if mask_.sum() == 0:
+                        pbar.update(len(time) - time_step)
+                        break
 
-                mask_ = sample["valid"][:, time_step]
-                x = sample["scalar_features"][:, time_step, :][mask_, :]
-                y = sample["win"][mask_]
+                    if file.exists():
+                        data = np.load(file)
+                        data = np.concatenate((data, x))
 
-                if mask_.sum() == 0:
-                    break
+                        wins_array = np.load(wins)
+                        wins_array = np.concatenate((wins_array, y))
+                        np.save(str(file), data)
+                        np.save(str(wins), wins_array)
+                    else:
+                        np.save(str(file), x)
+                        np.save(str(wins), y)
 
-                if file.exists():
-                    data = np.load(file)
-                    data = np.concatenate((data, x))
-
-                    wins_array = np.load(wins)
-                    wins_array = np.concatenate((wins_array, y))
-                    np.save(str(file), data)
-                    np.save(str(wins), wins_array)
-                else:
-                    np.save(str(file), x)
-                    np.save(str(wins), y)
+                    pbar.update(1)
 
         del dataloader
         del dataset
@@ -247,4 +251,5 @@ def fit_all(
 
 
 if __name__ == "__main__":
+    set_replay_database_logger_level(spdlog_lvl.warn)
     app()

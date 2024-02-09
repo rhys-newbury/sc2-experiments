@@ -67,6 +67,6 @@ class ASPP(nn.Module):
         proj = self.project(res)
         return proj
 
-class ASPPDecoder(nn.Module):
-    def __init__(self, in_ch: int, hidden_ch:  int, rates:  list[int]):
-        
+
+# class ASPPDecoder(nn.Module):
+#     def __init__(self, in_ch: int, hidden_ch:  int, rates:  list[int]):

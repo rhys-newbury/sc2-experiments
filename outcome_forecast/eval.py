@@ -2,7 +2,7 @@
 """Tool for gathering and formatting results"""
 import os
 from pathlib import Path
-
+from typing import Optional
 import typer
 import torch
 from torch import nn
@@ -18,6 +18,7 @@ from konductor.data import get_dataset_config, Split
 from konductor.metadata.loggers import ParquetLogger
 from konductor.metadata.database import Metadata
 from konductor.utilities.pbar import LivePbar
+import sqlite3
 
 from src.stats import BinaryAcc
 
@@ -44,7 +45,7 @@ def transform_latest_to_db_format(
     data: pd.DataFrame, time_points: list[TimePoint]
 ) -> dict[str, float]:
     """Grab the last iteration from the parquet
-    data and trasform to database dictionary input format"""
+    data and transform to database dictionary input format"""
     iteration = data["iteration"].max()
     average = data.query(f"iteration == {iteration}").mean()
     transformed = {
@@ -92,6 +93,7 @@ def evaluate(
     run_path: Annotated[Path, typer.Option()],
     datapath: Annotated[Path, typer.Option()],
     outdir: Annotated[str, typer.Option()],
+    batch_size: Annotated[Optional[int], typer.Option()] = None,
 ):
     """Run validation and save results new subdirectory"""
     if not datapath.exists():
@@ -99,6 +101,8 @@ def evaluate(
     os.environ["DATAPATH"] = str(datapath)
 
     exp_config = ExperimentInitConfig.from_run(run_path)
+    if batch_size is not None:
+        exp_config.set_batch_size(batch_size, Split.VAL)
 
     # AMP isn't enabled during eval
     if "amp" in exp_config.trainer:
@@ -131,6 +135,108 @@ def evaluate(
 
 
 @app.command()
+def evaluate_percent(
+    run_path: Annotated[Path, typer.Option()],
+    datapath: Annotated[Path, typer.Option()],
+    outdir: Annotated[str, typer.Option()],
+    database: Annotated[Path, typer.Option()],
+    num_buckets: Annotated[int, typer.Option()] = 50,
+    batch_size: Annotated[Optional[int], typer.Option()] = None,
+    workers: Annotated[Optional[int], typer.Option()] = None,
+):
+    """Run validation and save results new subdirectory"""
+    if not datapath.exists():
+        raise FileNotFoundError(datapath)
+
+    os.environ["DATAPATH"] = str(datapath)
+
+    conn = sqlite3.connect(str(database))
+    cursor = conn.cursor()
+
+    exp_config = ExperimentInitConfig.from_run(run_path)
+    if batch_size is not None:
+        exp_config.set_batch_size(batch_size, Split.VAL)
+    if workers is not None:
+        exp_config.set_workers(workers)
+
+    # AMP isn't enabled during eval
+    if "amp" in exp_config.trainer:
+        del exp_config.trainer["amp"]
+
+    model: nn.Module = get_model(exp_config)
+    ckpt = torch.load(run_path / "latest.pt")["model"]
+    model.load_state_dict(ckpt)
+    model = model.eval().cuda()
+    # import pdb; pdb.set_trace()
+    # exp_config.data[0].val_loader.keys.append("")
+    exp_config.data[0].dataset.args["keys"].append("metadata")
+    dataset = get_dataset_config(exp_config)
+
+    dataloader = dataset.get_dataloader(Split.VAL)
+
+    binary_acc = BinaryAcc.from_config(exp_config)
+    binary_acc.keep_batch = True
+
+    outpath = run_path / outdir
+    outpath.mkdir(exist_ok=True)
+
+    total_results = torch.zeros((2, num_buckets), device="cuda")
+    interval = 100 / num_buckets
+
+    with LivePbar(total=len(dataloader)) as pbar, torch.inference_mode():
+        for sample in dataloader:
+            if isinstance(sample, list):
+                sample = sample[0]
+            preds = model(sample)
+            results = binary_acc(preds, sample)
+
+            metadata = [
+                "".join([chr(x) for x in sublist])
+                for sublist in sample["metadata"].cpu().numpy().tolist()
+            ]
+
+            replayHash, playerId = [x[:-1] for x in metadata], [x[-1] for x in metadata]
+            query = "SELECT game_length FROM 'game_data' where " + " OR ".join(
+                [
+                    f'(replayHash = "{rh}" AND playerId = {pId})'
+                    for rh, pId in zip(replayHash, playerId)
+                ]
+            )
+            cursor.execute(query)
+            game_length = torch.tensor(
+                [x[0] for x in cursor.fetchall()], device=preds.device
+            )
+            game_length_mins = game_length / 22.4 / 60
+
+            for idx, k in enumerate(results.keys()):
+                time_point = float(k.split("_")[-1])
+                percent = 100 * time_point / game_length_mins
+
+                idx_mask = (percent // interval).type(torch.int64)
+                mask = torch.logical_and(
+                    sample["valid"][:, idx].type(torch.bool), percent <= 100
+                )
+
+                corrects = results[k][mask]
+
+                values, counts = torch.unique(
+                    idx_mask[mask][corrects.type(torch.bool)], return_counts=True
+                )
+                total_results[0, values] += counts
+
+                values, counts = torch.unique(idx_mask[mask], return_counts=True)
+                total_results[1, values] += counts
+
+            pbar.update(1)
+
+    np.savetxt(
+        outpath / f"game_length_results_{num_buckets}",
+        total_results.cpu().numpy(),
+        delimiter=",",
+    )
+
+
+@app.command()
 def evaluate_all(
     workspace: Annotated[Path, typer.Option()],
     datapath: Annotated[Path, typer.Option()],
@@ -146,6 +252,30 @@ def evaluate_all(
     for run in filter(is_valid_run, workspace.iterdir()):
         print(f"Doing {run}")
         evaluate(run, datapath, outdir)
+
+
+@app.command()
+def evaluate_all_percent(
+    workspace: Annotated[Path, typer.Option()],
+    datapath: Annotated[Path, typer.Option()],
+    outdir: Annotated[str, typer.Option()],
+    database: Annotated[Path, typer.Option()],
+    num_buckets: Annotated[int, typer.Option()] = 50,
+    batch_size: Annotated[Optional[int], typer.Option()] = None,
+    workers: Annotated[Optional[int], typer.Option()] = None,
+):
+    """Run validaiton and save to a subdirectory"""
+    if not datapath.exists():
+        raise FileNotFoundError(datapath)
+
+    def is_valid_run(path: Path):
+        return path.is_dir() and (path / "latest.pt").exists()
+
+    for run in filter(is_valid_run, workspace.iterdir()):
+        print(f"Doing {run}")
+        evaluate_percent(
+            run, datapath, outdir, database, num_buckets, batch_size, workers
+        )
 
 
 if __name__ == "__main__":
