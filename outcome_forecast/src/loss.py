@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+import torch
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model_config
 from konductor.losses import LossConfig, REGISTRY
@@ -49,7 +50,7 @@ class WinBCECfg(LossConfig):
         return WinBCELogits() if self.model_output_logits else WinBCE()
 
 
-class MinimapForecast(nn.BCEWithLogitsLoss):
+class MinimapBCE(nn.BCEWithLogitsLoss):
     def __init__(self, history_len: int):
         super().__init__(reduction="none")
         self.history_len = history_len
@@ -78,4 +79,64 @@ class MinimapForecastBCE(LossConfig):
         return super().from_config(config, idx, **kwargs)
 
     def get_instance(self, *args, **kwargs):
-        return MinimapForecast(self.history_len)
+        return MinimapBCE(self.history_len)
+
+
+class MinimapFocal(nn.BCEWithLogitsLoss):
+    def __init__(
+        self,
+        history_len: int,
+        alpha: float = 0.75,
+        gamma: float = 2,
+        pos_weight: float = 2,
+    ) -> None:
+        pos_weight_tensor = torch.tensor(pos_weight)
+        if torch.cuda.is_available():
+            pos_weight_tensor.cuda()
+        super().__init__(reduction="none", pos_weight=pos_weight_tensor)
+        self.alpha = alpha
+        self.gamma = gamma
+        self.history_len = history_len
+
+    def _focal_loss(self, pred: Tensor, target: Tensor):
+        prob = pred.sigmoid()
+        bce_loss = super().forward(pred, target)
+        p_t = prob * target + (1 - prob) * (1 - target)
+        loss = bce_loss * ((1 - p_t + torch.finfo(prob.dtype).eps) ** self.gamma)
+
+        if self.alpha >= 0:
+            alpha_t = self.alpha * target + (1 - self.alpha) * (1 - target)
+            loss = alpha_t * loss
+
+        return loss
+
+    def forward(
+        self, predictions: Tensor, targets: dict[str, Tensor]
+    ) -> dict[str, Tensor]:
+        minimaps_player = targets["minimap_features"][:, :, [-4, -1]]
+        next_minimap = minimaps_player[:, self.history_len :]
+        loss_mask = self._focal_loss(predictions, next_minimap)
+        loss_sequence = loss_mask.mean(dim=(-1, -2, -3))
+
+        valid_seq = get_valid_sequence_mask(targets["valid"], self.history_len)
+        loss_sequence *= valid_seq
+
+        return {"minimap-focal": loss_sequence.mean()}
+
+
+@dataclass
+@REGISTRY.register_module("minimap-focal")
+class MinimapForecastBCE(LossConfig):
+    history_len: int
+    alpha: float = 0.75
+    gamma: float = 0.2
+    pos_weight: float = 1.0
+
+    @classmethod
+    def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
+        model_cfg = get_model_config(config=config)
+        config.criterion[idx].args["history_len"] = model_cfg.history_len
+        return super().from_config(config, idx, **kwargs)
+
+    def get_instance(self, *args, **kwargs):
+        return self.init_auto_filter(MinimapBCE, **self.__dict__)

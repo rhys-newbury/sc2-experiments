@@ -66,7 +66,7 @@ def get_statistics(exp_cfg: ExperimentInitConfig) -> dict[str, Statistic]:
             }
         )
 
-    if any(l in {"minimap-bce"} for l in loss_types):
+    if any(l in {"minimap-bce", "minimap-focal"} for l in loss_types):
         stats["minimap-soft-iou"] = src.stats.MinimapSoftIoU.from_config(exp_cfg)
 
     if len(stats) == 0:
