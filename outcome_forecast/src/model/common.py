@@ -78,31 +78,41 @@ class ImageFPN(nn.Module):
     def __init__(
         self,
         in_ch: int,
-        output_lvl: int,
         hidden_chs: list[int],
         strides: list[int],
         paddings: list[int],
+        output_lvl: int | None = None,
+        disable_fpn: bool = False,
     ) -> None:
         super().__init__()
-        self.in_ch = in_ch
+        if not disable_fpn:
+            assert output_lvl is not None
+        if output_lvl is None:
+            assert disable_fpn
 
         self.enc = nn.ModuleList()
         chs = [in_ch] + hidden_chs
         for in_ch, out_ch, stride, padding in zip(chs[:-1], chs[1:], strides, paddings):
             self.enc.append(ImageFPN.make_conv(in_ch, out_ch, stride, padding))
 
-        self.output_chs = hidden_chs[-output_lvl:]
-        self.output_idx = len(self.enc) - output_lvl
+        if output_lvl is None:
+            output_lvl = 1
+        self.out_ch = hidden_chs[-output_lvl:]
+        self.disable_fpn = disable_fpn
+        if self.disable_fpn:
+            self.out_ch = self.out_ch[0]
+        self._output_idx = len(self.enc) - output_lvl - 1
 
     @staticmethod
     def make_conv(in_ch, out_ch, stride, padding):
         return nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, stride, padding),
-            nn.BatchNorm2d(in_ch),
+            nn.BatchNorm2d(out_ch),
             nn.ReLU(),
         )
 
-    def forward(self, inputs: Tensor) -> list[Tensor]:
+    def forward(self, inputs: Tensor) -> list[Tensor] | Tensor:
+        """Output FPN sorted by low to high spatial resolution"""
         if inputs.ndim == 5:
             b, t, c, h, w = inputs.shape
             feat = inputs.reshape(b, t * c, h, w)
@@ -112,23 +122,12 @@ class ImageFPN(nn.Module):
         out: list[Tensor] = []
         for idx, mod in enumerate(self.enc):
             feat = mod(feat)
-            if idx > self.output_idx:
+            if idx > self._output_idx:
                 out.append(feat)
 
-        return out
+        return out[0] if self.disable_fpn else out[::-1]
 
 
-@MODEL_REGISTRY.register_module("image-fpn-3d")
-class ImageFPN3d(nn.Module):
-    def __init__(self, in_ch: int, ch_2d: list[int], ch_3d: list[int]) -> None:
-        super().__init__()
-        self.in_ch = in_ch
-
-    def forward(self, inputs: Tensor) -> list[Tensor]:
-        return [inputs]
-
-
-@MODEL_REGISTRY.register_module("psp-layer")
 def make_basic_encoder(
     in_ch: int,
     hidden_ch: int,
