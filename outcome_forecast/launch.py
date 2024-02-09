@@ -33,6 +33,8 @@ DATASETS = [
     Dataset("492", "converted/4.9.2"),
 ]
 
+EXP_TYPE = ["outcome", "minimap"]
+
 
 @app.command()
 def main(
@@ -74,9 +76,14 @@ def main(
     print("Datasets (DATAPATH)")
     for idx, name in enumerate(DATASETS):
         print(f"{idx}: {name}")
-    dataset = DATASETS[int(input("Select :"))]
+    dataset = DATASETS[int(input("Select: "))]
     template_conf["dataset"] = dataset.path
     template_conf["dataset_type"] = dataset.subset
+
+    print("Experiment Type: ")
+    for idx, name in enumerate(EXP_TYPE):
+        print(f"{idx}: {name}")
+    template_conf["exp_type"] = EXP_TYPE[int(input("Select: "))]
 
     env = Environment(loader=FileSystemLoader("template/"))
     template = env.get_template(template_name)
