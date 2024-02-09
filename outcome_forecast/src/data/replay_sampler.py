@@ -109,7 +109,8 @@ class SQLSampler(ReplaySampler):
         """Filter sampled replays from a folder of replays
 
         Args:
-            database (str): Path to sqlite3 database with replay info, prefix '$ENV:' will be prefixed with DATAPATH
+            database (str): Path to sqlite3 database with replay info,
+                            prefix '$ENV:' will be prefixed with DATAPATH
             replays_folder (Path): Path to folder of .SC2Replays file(s)
             filter_query (str): SQL query to filter sampled replays
             train_ratio (float): Proportion of all data used for training

@@ -165,3 +165,7 @@ workspace
 outcome_forecast/wandb/
 *.png
 *.csv
+*.pdf
+*.scores
+*.tf_record
+*.db

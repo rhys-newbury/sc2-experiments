@@ -188,8 +188,10 @@ class ScalarEncoderV1(nn.Module):
 @MODEL_REGISTRY.register_module("scalar-v2")
 class ScalarEncoderV2(nn.Module):
     """
-    Encoder that tests the game step and either normalizes in a particular range or selects a set of parameters.
-    Assuming from sc2_serializer/include/replay_parsing.hpp that gameStep is the last scalar feature.
+    Encoder that tests the game step and either normalizes in a particular
+        range or selects a set of parameters.
+    Assuming from sc2_serializer/include/replay_parsing.hpp
+        that gameStep is the last scalar feature.
     """
 
     is_logit_output = True

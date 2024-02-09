@@ -21,4 +21,3 @@ for program in results:
     skeys = sorted(results[program].keys())
     s = ", ".join(f"{k}: {results[program][k]:.2f}" for k in skeys)
     print(f"{program:{pad}}", s)
-

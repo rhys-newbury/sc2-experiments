@@ -12,6 +12,7 @@ from sklearn.model_selection import KFold, cross_val_score
 import yaml
 from typing_extensions import Annotated
 import os
+
 try:
     import xgboost
 except ImportError:
@@ -158,7 +159,8 @@ def fit_model(
         )
         with open(output / f"{ts_index}.txt", "w") as out_file:
             out_file.write(
-                f"{model_scores.mean():.4f} accuracy with a standard deviation of {model_scores.std():.4f}"
+                f"{model_scores.mean():.4f} accuracy with a standard deviation of "
+                f"{model_scores.std():.4f}"
             )
 
 

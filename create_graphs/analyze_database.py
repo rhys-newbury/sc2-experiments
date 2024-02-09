@@ -1,17 +1,12 @@
 import sqlite3
 import typer
 import numpy as np
-import os
 from typing_extensions import Annotated
 from pathlib import Path
 from sc2_replay_reader import Race, Result
 from typing import List, Any, Callable, Dict, Tuple
 from functools import reduce
 import matplotlib.pyplot as plt
-import seaborn as sns
-import matplotlib.pyplot as plt
-from pathlib import Path
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from violin_plot import plot_single, plot_vs
 
 app = typer.Typer()
