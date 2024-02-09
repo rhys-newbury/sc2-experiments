@@ -139,4 +139,4 @@ class MinimapForecastBCE(LossConfig):
         return super().from_config(config, idx, **kwargs)
 
     def get_instance(self, *args, **kwargs):
-        return self.init_auto_filter(MinimapBCE, **self.__dict__)
+        return self.init_auto_filter(MinimapFocal, **self.__dict__)
