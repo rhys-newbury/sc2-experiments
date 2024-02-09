@@ -2,11 +2,12 @@
 
 from dataclasses import dataclass
 
-import torch
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model_config
 from konductor.losses import LossConfig, REGISTRY
 from torch import nn, Tensor
+
+from .utils import get_valid_sequence_mask
 
 
 class WinBCELogits(nn.BCEWithLogitsLoss):
@@ -53,29 +54,13 @@ class MinimapForecast(nn.BCEWithLogitsLoss):
         super().__init__(reduction="none")
         self.history_len = history_len
 
-    def get_valid_mask(self, valid: Tensor) -> Tensor:
-        is_valid: list[Tensor] = []
-        n_time = valid.shape[1]
-        for start_idx in range(n_time - self.history_len):
-            end_idx = start_idx + self.history_len
-            is_valid.append(valid[:, start_idx:end_idx].all(dim=1))
-        return torch.stack(is_valid, dim=1)
-
-    def get_next_minimap_truth(self, minimaps: Tensor) -> Tensor:
-        next_minimaps: list[Tensor] = []
-        n_time = minimaps.shape[1]
-        for start_idx in range(n_time - self.history_len):
-            end_idx = start_idx + self.history_len
-            next_minimaps.append(minimaps[:, end_idx])
-        return torch.stack(next_minimaps, dim=1)
-
     def forward(self, pred: Tensor, target: dict[str, Tensor]) -> dict[str, Tensor]:
         """Only apply loss where all images in the sequence are valid"""
         minimaps_player = target["minimap_features"][:, :, [-4, -1]]
-        next_minimap = self.get_next_minimap_truth(minimaps_player)
+        next_minimap = minimaps_player[:, self.history_len :]
         loss = super().forward(pred, next_minimap).mean(dim=(-1, -2, -3))
 
-        valid_seq = self.get_valid_mask(target["valid"])
+        valid_seq = get_valid_sequence_mask(target["valid"], self.history_len)
         loss *= valid_seq
 
         return {"minimap-bce": loss.mean()}

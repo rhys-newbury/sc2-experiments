@@ -2,13 +2,14 @@
 Statistics for game outcome prediction
 """
 
+import itertools
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Dict, Sequence
 
 import torch
 from torch import Tensor
 from konductor.data import get_dataset_properties
-from konductor.models import get_model
+from konductor.models import get_model_config
 from konductor.init import ExperimentInitConfig
 from konductor.metadata.base_statistic import Statistic, STATISTICS_REGISTRY
 
@@ -45,18 +46,15 @@ class BinaryAcc(Statistic):
     @classmethod
     def from_config(cls, cfg: ExperimentInitConfig, **extras):
         data_cfg = get_dataset_properties(cfg)
-        if "timepoints" in data_cfg:
-            timepoints = data_cfg["timepoints"].arange()
-        else:
-            timepoints = None
-        model = get_model(cfg)
+        timepoints = data_cfg["timepoints"].arange()
+        model = get_model_config(cfg).get_instance()
         should_sigmoid = model.is_logit_output
         return cls(timepoints=timepoints, should_sigmoid=should_sigmoid, **extras)
 
     def __init__(
         self,
+        timepoints: Sequence[int],
         should_sigmoid: bool = True,
-        timepoints: Sequence[int] | None = None,
         keep_batch: bool = False,
     ) -> None:
         """Initialize the win prediciton statistics calculator
@@ -66,7 +64,7 @@ class BinaryAcc(Statistic):
             in minutes where to sample the accuracy of the model. If None given
             defaults to every 2min up to 30min.
         """
-        self.timepoints = torch.arange(2, 32, 2) if timepoints is None else timepoints
+        self.timepoints = timepoints
         self.should_sigmoid = should_sigmoid
         self.keep_batch = keep_batch
 
@@ -157,7 +155,7 @@ class WinAUC(Statistic):
             timepoints = data_cfg["timepoints"].arange()
         else:
             timepoints = None
-        model = get_model(cfg)
+        model = get_model_config(cfg).get_instance()
         should_sigmoid = model.is_logit_output
         return cls(timepoints=timepoints, should_sigmoid=should_sigmoid, **extras)
 
@@ -269,3 +267,63 @@ class WinAUC(Statistic):
             if res is not None:
                 result[key] = res
         return result
+
+
+@STATISTICS_REGISTRY.register_module("minimap-soft-iou")
+class MinimapSoftIoU(Statistic):
+    @classmethod
+    def from_config(cls, cfg: ExperimentInitConfig, **extras):
+        model_cfg = get_model_config(config=cfg)
+        data_cfg = get_dataset_properties(cfg)
+        timepoints = data_cfg["timepoints"].arange()
+        model_inst = model_cfg.get_instance()
+        return cls(model_cfg.history_len, timepoints, model_inst.is_logit_output)
+
+    def get_keys(self) -> list[str]:
+        return [
+            f"soft_iou_{t}_{p}"
+            for t, p in itertools.product(self.timepoints, ["self", "enemy"])
+        ]
+
+    def __init__(
+        self,
+        sequence_len: int,
+        timepoints: Sequence[int],
+        should_sigmoid: bool = True,
+        keep_batch: bool = False,
+    ) -> None:
+        super().__init__()
+        self.sequence_len = sequence_len
+        self.should_sigmoid = should_sigmoid
+        self.timepoints = timepoints[sequence_len:]
+        self.keep_batch = keep_batch
+
+    @staticmethod
+    def calculate_soft_iou(pred: Tensor, target: Tensor) -> Tensor:
+        """Calculates iou for binary mask over hw axis"""
+        soft_intersection = (pred * target).sum(dim=(-1, -2))
+        soft_union = (pred + target - pred * target).sum(dim=(-1, -2))
+        soft_iou = soft_intersection / soft_union
+        return soft_iou
+
+    def __call__(
+        self, predictions: Tensor, targets: dict[str, Tensor]
+    ) -> Dict[str, float | Tensor]:
+        minimaps_player = targets["minimap_features"][:, :, [-4, -1]]
+        next_minimap = minimaps_player[:, self.sequence_len :]
+        if self.should_sigmoid:
+            predictions = torch.sigmoid(predictions)
+
+        results: dict[str, float | Tensor] = {}
+        for idx in range(next_minimap.shape[1]):
+            soft_iou = MinimapSoftIoU.calculate_soft_iou(
+                predictions[:, idx], next_minimap[:, idx]
+            )
+            t = self.timepoints[idx]
+            results[f"soft_iou_{t}_self"] = soft_iou[:, 0]
+            results[f"soft_iou_{t}_enemy"] = soft_iou[:, 1]
+
+        if not self.keep_batch:
+            results = {k: v.mean().item() for k, v in results.items()}
+
+        return results
