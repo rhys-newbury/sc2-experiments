@@ -163,15 +163,19 @@ def evaluate_percent(
             metadata = metadata_to_str(sample["metadata"])
 
             replayHash, playerId = [x[:-1] for x in metadata], [x[-1] for x in metadata]
-            query = "SELECT game_length FROM 'game_data' where " + " OR ".join(
-                [
-                    f'(replayHash = "{rh}" AND playerId = {pId})'
-                    for rh, pId in zip(replayHash, playerId)
-                ]
+            query = (
+                "SELECT replayHash, game_length FROM 'game_data' where "
+                + " OR ".join(
+                    [
+                        f'(replayHash = "{rh}" AND playerId = {pId})'
+                        for rh, pId in zip(replayHash, playerId)
+                    ]
+                )
             )
             cursor.execute(query)
+            rg_map = {x[0]: x[1] for x in cursor.fetchall()}
             game_length = torch.tensor(
-                [x[0] for x in cursor.fetchall()], device=preds.device
+                [rg_map[rh] for rh in replayHash], device=preds.device
             )
             game_length_mins = game_length / 22.4 / 60
 
@@ -185,7 +189,7 @@ def evaluate_percent(
 
                 corrects = results[k][mask]
 
-                if corrects.sum() > 0:
+                if mask.sum() > 0:
                     idx_mask = (percent // interval).type(torch.int64)
 
                     values, counts = torch.unique(
