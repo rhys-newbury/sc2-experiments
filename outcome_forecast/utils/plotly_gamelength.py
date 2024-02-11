@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 
 import numpy as np
 import dash_bootstrap_components as dbc
@@ -7,10 +6,6 @@ import plotly.graph_objects as go
 from dash import Input, Output, callback, dcc, html
 from dash.exceptions import PreventUpdate
 from konductor.metadata.database.sqlite import SQLiteDB, DEFAULT_FILENAME
-
-from typing import List
-
-_WAYPOINT_COL_RE = re.compile(r"\b[a-zA-Z]+_\d+\b")
 
 
 class TimePoint:
@@ -45,34 +40,12 @@ layout = html.Div(
         dbc.Row(
             [
                 html.H3("Eval Accuracy Over % Game Length"),
+                dcc.Dropdown(id="ts2-eval_folder", options=["tournament", "492"]),
                 dcc.Graph(id="ts2-length-win", selectedData={}),
             ]
         ),
     ]
 )
-
-
-def get_performance_data(root: Path, metric: str):
-    db_handle = SQLiteDB(root / DEFAULT_FILENAME)
-    time_step = TimePoint(float(metric)).as_db_key()
-    output = (
-        db_handle.cursor()
-        .execute(f"SELECT hash, {time_step} FROM binary_accuracy")
-        .fetchall()
-    )
-
-    return output
-
-
-def get_all_performance_data(root: Path, keys: List[str]):
-    db_handle = SQLiteDB(root / DEFAULT_FILENAME)
-    output = (
-        db_handle.cursor()
-        .execute(f"SELECT hash, {','.join(keys)} FROM binary_accuracy")
-        .fetchall()
-    )
-
-    return output
 
 
 def hash_to_brief(root: Path):
@@ -83,11 +56,11 @@ def hash_to_brief(root: Path):
 
 @callback(
     Output("ts2-length-win", "figure"),
+    Input("ts2-eval_folder", "value"),
     Input("root-dir", "data"),
     prevent_initial_call=False,
 )
-def update_game_length(root: str):
-    print(root)
+def update_game_length(eval_folder: str, root: str):
     if not all([root]):
         raise PreventUpdate
 
@@ -100,7 +73,7 @@ def update_game_length(root: str):
         if not folder.is_dir():
             continue
 
-        csv = folder / "percent" / "game_length_results_50"
+        csv = folder / f"percent_{eval_folder}" / "game_length_results_50"
 
         if not csv.exists():
             continue
@@ -111,7 +84,7 @@ def update_game_length(root: str):
         counts = lines[0].split(",")
         totals = lines[1].split(",")
 
-        percentage = [float(c) / float(t) for c, t in zip(counts, totals)]
+        percentage = [float(c) / float(t) for c, t in zip(counts[1:], totals[1:])]
         times = list(range(0, 100, 2))
 
         # Add a scatter plot
