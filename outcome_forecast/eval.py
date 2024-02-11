@@ -17,7 +17,7 @@ from konductor.models import get_model
 from konductor.data import get_dataset_config, Split
 from konductor.metadata.loggers import ParquetLogger
 from konductor.metadata.database import Metadata
-from konductor.utilities.pbar import LivePbar
+from konductor.utilities.pbar import IntervalPbar
 import sqlite3
 
 from src.stats import BinaryAcc
@@ -122,7 +122,9 @@ def evaluate(
 
     meta = Metadata.from_yaml(run_path / "metadata.yaml")
 
-    with LivePbar(total=len(dataloader)) as pbar, torch.inference_mode():
+    with IntervalPbar(
+        total=len(dataloader), fraction=0.1
+    ) as pbar, torch.inference_mode():
         for sample in dataloader:
             if isinstance(sample, list):
                 sample = sample[0]
@@ -183,7 +185,9 @@ def evaluate_percent(
     total_results = torch.zeros((2, num_buckets), device="cuda")
     interval = 100 / num_buckets
 
-    with LivePbar(total=len(dataloader)) as pbar, torch.inference_mode():
+    with IntervalPbar(
+        total=len(dataloader), fraction=0.1
+    ) as pbar, torch.inference_mode():
         for sample in dataloader:
             if isinstance(sample, list):
                 sample = sample[0]
@@ -212,20 +216,23 @@ def evaluate_percent(
                 time_point = float(k.split("_")[-1])
                 percent = 100 * time_point / game_length_mins
 
-                idx_mask = (percent // interval).type(torch.int64)
                 mask = torch.logical_and(
-                    sample["valid"][:, idx].type(torch.bool), percent <= 100
+                    sample["valid"][:, idx].type(torch.bool), percent < 100
                 )
 
                 corrects = results[k][mask]
 
-                values, counts = torch.unique(
-                    idx_mask[mask][corrects.type(torch.bool)], return_counts=True
-                )
-                total_results[0, values] += counts
+                if corrects.sum() > 0:
+                    idx_mask = (percent // interval).type(torch.int64)
 
-                values, counts = torch.unique(idx_mask[mask], return_counts=True)
-                total_results[1, values] += counts
+                    values, counts = torch.unique(
+                        idx_mask[mask][corrects.type(torch.bool)], return_counts=True
+                    )
+
+                    total_results[0, values] += counts
+
+                    values, counts = torch.unique(idx_mask[mask], return_counts=True)
+                    total_results[1, values] += counts
 
             pbar.update(1)
 
