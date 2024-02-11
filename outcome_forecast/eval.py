@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
 """Tool for gathering and formatting results"""
-import os
+import sqlite3
 from pathlib import Path
-from typing import Optional
-import typer
-import torch
-from torch import nn
+from typing import Annotated, Optional
+
 import numpy as np
 import pandas as pd
-from pyarrow import parquet as pq
-from typing_extensions import Annotated
-from konductor.metadata.database.sqlite import SQLiteDB, DEFAULT_FILENAME
-from konductor.utilities.metadata import update_database
-from konductor.init import ExperimentInitConfig
-from konductor.models import get_model
-from konductor.data import get_dataset_config, Split
-from konductor.metadata.loggers import ParquetLogger
+import torch
+import typer
+from konductor.data import Split
 from konductor.metadata.database import Metadata
 from konductor.utilities.pbar import IntervalPbar
-import sqlite3
 
+from konductor.metadata.database.sqlite import DEFAULT_FILENAME, SQLiteDB
+from konductor.metadata.loggers import ParquetLogger
+from konductor.utilities.metadata import update_database
+from konductor.utilities.pbar import LivePbar
+from pyarrow import parquet as pq
 from src.stats import BinaryAcc
+from torch import Tensor
+from utils.eval_helpers import (
+    get_dataloader_with_metadata,
+    setup_eval_model_and_dataloader,
+    write_minimap_forecast_results,
+    metadata_to_str,
+)
 
 app = typer.Typer()
 
@@ -91,29 +95,13 @@ def gather_ml_binary_accuracy(workspace: Annotated[Path, typer.Option()] = Path.
 @app.command()
 def evaluate(
     run_path: Annotated[Path, typer.Option()],
-    datapath: Annotated[Path, typer.Option()],
     outdir: Annotated[str, typer.Option()],
     batch_size: Annotated[Optional[int], typer.Option()] = None,
 ):
     """Run validation and save results new subdirectory"""
-    if not datapath.exists():
-        raise FileNotFoundError(datapath)
-    os.environ["DATAPATH"] = str(datapath)
-
-    exp_config = ExperimentInitConfig.from_run(run_path)
-    if batch_size is not None:
-        exp_config.set_batch_size(batch_size, Split.VAL)
-
-    # AMP isn't enabled during eval
-    if "amp" in exp_config.trainer:
-        del exp_config.trainer["amp"]
-
-    model: nn.Module = get_model(exp_config)
-    ckpt = torch.load(run_path / "latest.pt")["model"]
-    model.load_state_dict(ckpt)
-    model = model.eval().cuda()
-    dataset = get_dataset_config(exp_config)
-    dataloader = dataset.get_dataloader(Split.VAL)
+    exp_config, model, dataloader = setup_eval_model_and_dataloader(
+        run_path, batch_size=batch_size
+    )
     binary_acc = BinaryAcc.from_config(exp_config)
 
     outpath = run_path / outdir
@@ -139,7 +127,6 @@ def evaluate(
 @app.command()
 def evaluate_percent(
     run_path: Annotated[Path, typer.Option()],
-    datapath: Annotated[Path, typer.Option()],
     outdir: Annotated[str, typer.Option()],
     database: Annotated[Path, typer.Option()],
     num_buckets: Annotated[int, typer.Option()] = 50,
@@ -147,34 +134,13 @@ def evaluate_percent(
     workers: Annotated[Optional[int], typer.Option()] = None,
 ):
     """Run validation and save results new subdirectory"""
-    if not datapath.exists():
-        raise FileNotFoundError(datapath)
-
-    os.environ["DATAPATH"] = str(datapath)
-
     conn = sqlite3.connect(str(database))
     cursor = conn.cursor()
 
-    exp_config = ExperimentInitConfig.from_run(run_path)
-    if batch_size is not None:
-        exp_config.set_batch_size(batch_size, Split.VAL)
-    if workers is not None:
-        exp_config.set_workers(workers)
-
-    # AMP isn't enabled during eval
-    if "amp" in exp_config.trainer:
-        del exp_config.trainer["amp"]
-
-    model: nn.Module = get_model(exp_config)
-    ckpt = torch.load(run_path / "latest.pt")["model"]
-    model.load_state_dict(ckpt)
-    model = model.eval().cuda()
-    # import pdb; pdb.set_trace()
-    # exp_config.data[0].val_loader.keys.append("")
-    exp_config.data[0].dataset.args["keys"].append("metadata")
-    dataset = get_dataset_config(exp_config)
-
-    dataloader = dataset.get_dataloader(Split.VAL)
+    exp_config, model, _ = setup_eval_model_and_dataloader(
+        run_path, batch_size=batch_size, workers=workers
+    )
+    dataloader = get_dataloader_with_metadata(exp_config)
 
     binary_acc = BinaryAcc.from_config(exp_config)
     binary_acc.keep_batch = True
@@ -194,10 +160,7 @@ def evaluate_percent(
             preds = model(sample)
             results = binary_acc(preds, sample)
 
-            metadata = [
-                "".join([chr(x) for x in sublist])
-                for sublist in sample["metadata"].cpu().numpy().tolist()
-            ]
+            metadata = metadata_to_str(sample["metadata"])
 
             replayHash, playerId = [x[:-1] for x in metadata], [x[-1] for x in metadata]
             query = "SELECT game_length FROM 'game_data' where " + " OR ".join(
@@ -246,25 +209,22 @@ def evaluate_percent(
 @app.command()
 def evaluate_all(
     workspace: Annotated[Path, typer.Option()],
-    datapath: Annotated[Path, typer.Option()],
     outdir: Annotated[str, typer.Option()],
+    batch_size: Annotated[Optional[int], typer] = None,
 ):
     """Run validaiton and save to a subdirectory"""
-    if not datapath.exists():
-        raise FileNotFoundError(datapath)
 
     def is_valid_run(path: Path):
         return path.is_dir() and (path / "latest.pt").exists()
 
     for run in filter(is_valid_run, workspace.iterdir()):
         print(f"Doing {run}")
-        evaluate(run, datapath, outdir)
+        evaluate(run, outdir, batch_size)
 
 
 @app.command()
 def evaluate_all_percent(
     workspace: Annotated[Path, typer.Option()],
-    datapath: Annotated[Path, typer.Option()],
     outdir: Annotated[str, typer.Option()],
     database: Annotated[Path, typer.Option()],
     num_buckets: Annotated[int, typer.Option()] = 50,
@@ -272,17 +232,40 @@ def evaluate_all_percent(
     workers: Annotated[Optional[int], typer.Option()] = None,
 ):
     """Run validaiton and save to a subdirectory"""
-    if not datapath.exists():
-        raise FileNotFoundError(datapath)
 
     def is_valid_run(path: Path):
         return path.is_dir() and (path / "latest.pt").exists()
 
     for run in filter(is_valid_run, workspace.iterdir()):
         print(f"Doing {run}")
-        evaluate_percent(
-            run, datapath, outdir, database, num_buckets, batch_size, workers
-        )
+        evaluate_percent(run, outdir, database, num_buckets, batch_size, workers)
+
+
+@app.command()
+@torch.inference_mode()
+def visualise_minimap_forecast(
+    run_path: Annotated[Path, typer.Option()],
+    workers: Annotated[int, typer.Option()] = 4,
+    batch_size: Annotated[int, typer.Option()] = 16,
+    split: Annotated[Split, typer.Option()] = Split.VAL,
+    n_samples: Annotated[int, typer.Option()] = 16,
+):
+    """Write images or minimap forecast for konduct review image viewer."""
+    exp_config, model, _ = setup_eval_model_and_dataloader(
+        run_path, split=split, workers=workers, batch_size=batch_size
+    )
+    dataloader = get_dataloader_with_metadata(exp_config)
+
+    outdir = exp_config.exp_path / "images"
+    outdir.mkdir(exist_ok=True)
+    with LivePbar(total=n_samples, desc="Generating Images") as pbar:
+        for sample_ in dataloader:
+            sample: dict[str, Tensor] = sample_[0]
+            preds: Tensor = model(sample)
+            write_minimap_forecast_results(preds, sample, outdir)
+            pbar.update(preds.shape[0])
+            if pbar.n >= n_samples:
+                break
 
 
 if __name__ == "__main__":

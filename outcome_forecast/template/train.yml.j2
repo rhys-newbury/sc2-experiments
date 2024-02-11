@@ -31,8 +31,8 @@ spec:
                   --standalone,
                   --nproc_per_node={{ [n_gpu, 1] | max }},
                   /app/outcome_forecast/train.py,
-                  --workspace=/mnt/storage/outcome-experiments/{{ dataset_type }},
-                  --config-file=/mnt/storage/outcome-experiments/config/{{ exp_config }}.yml,
+                  --workspace=/mnt/storage/{{ exp_type }}-experiments/{{ dataset_type }},
+                  --config-file=/mnt/storage/{{ exp_type }}-experiments/config/{{ exp_config }}.yml,
                   --epoch={{ epochs }},
                   --workers={{ n_worker }},
                 {%- if brief %}

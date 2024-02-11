@@ -136,3 +136,18 @@ class ConvForecaster(nn.Module):
 
         out = torch.stack(preds, dim=1)
         return out
+
+
+class TransformerForecasterV1(nn.Module):
+    """Just do the ol' flatten, and MHA over time and space"""
+
+
+@dataclass
+@MODEL_REGISTRY.register_module("transformer-forecast-v1")
+class TransformerForecasterConfig(TorchModelConfig):
+    @classmethod
+    def from_config(cls, config: ExperimentInitConfig, idx: int = 0) -> Any:
+        return super().from_config(config, idx)
+
+    def get_instance(self, *args, **kwargs) -> Any:
+        return TransformerForecasterV1()

@@ -10,7 +10,7 @@ import typer
 import yaml
 from konductor.data import get_dataset_config
 from konductor.init import ExperimentInitConfig, ModuleInitConfig
-from konductor.metadata import DataManager
+from konductor.metadata import DataManager, Statistic
 from konductor.metadata.loggers import MultiWriter, ParquetLogger, TBLogger, WandBLogger
 from konductor.trainer.pytorch import (
     PyTorchTrainer,
@@ -54,6 +54,27 @@ class Trainer(PyTorchTrainer):
         return {k: d[mask, ...] for k, d in data.items()}
 
 
+def get_statistics(exp_cfg: ExperimentInitConfig) -> dict[str, Statistic]:
+    """Determine what statistics to track depending on losses used"""
+    loss_types = [l.type for l in exp_cfg.criterion]
+    stats: dict[str, Statistic] = {}
+    if any(l in {"win-bce"} for l in loss_types):
+        stats.update(
+            {
+                "win-auc": src.stats.WinAUC.from_config(exp_cfg),
+                "binary-acc": src.stats.BinaryAcc.from_config(exp_cfg),
+            }
+        )
+
+    if any(l in {"minimap-bce", "minimap-focal"} for l in loss_types):
+        stats["minimap-soft-iou"] = src.stats.MinimapSoftIoU.from_config(exp_cfg)
+
+    if len(stats) == 0:
+        raise NotImplementedError(f"no statistics for {loss_types=}")
+
+    return stats
+
+
 app = typer.Typer()
 
 
@@ -95,10 +116,7 @@ def main(
     data_manager = DataManager.default_build(
         exp_cfg,
         train_modules.get_checkpointables(),
-        {
-            "win-auc": src.stats.WinAUC.from_config(exp_cfg),
-            "binary-acc": src.stats.BinaryAcc.from_config(exp_cfg),
-        },
+        get_statistics(exp_cfg),
         MultiWriter(
             [ParquetLogger(exp_cfg.exp_path), TBLogger(exp_cfg.exp_path)] + wb_writer
         ),
