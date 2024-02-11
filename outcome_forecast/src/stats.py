@@ -13,6 +13,8 @@ from konductor.models import get_model_config
 from konductor.init import ExperimentInitConfig
 from konductor.metadata.base_statistic import Statistic, STATISTICS_REGISTRY
 
+from utils import get_valid_sequence_mask
+
 
 @dataclass
 class Confusion:
@@ -322,6 +324,9 @@ class MinimapSoftIoU(Statistic):
             t = self.timepoints[idx]
             results[f"soft_iou_{t}_self"] = soft_iou[:, 0]
             results[f"soft_iou_{t}_enemy"] = soft_iou[:, 1]
+
+        # TODO Mask out accuracy contrib of parts with invalid sequences
+        # valid_mask = get_valid_sequence_mask(targets["valid"], self.sequence_len)
 
         if not self.keep_batch:
             results = {k: v.mean().item() for k, v in results.items()}

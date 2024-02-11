@@ -5,6 +5,30 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Visualize",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/outcome_forecast/eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "visualise-minimap-forecast",
+                "--run-path=/media/bryce/nfs/minimap-experiments/tournament/36be5c4e842663fc95602e37224a260a"
+            ]
+        },
+        {
+            "name": "Eval",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/outcome_forecast/eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "evaluate-all",
+                "--workspace=/media/bryce/nfs/outcome-experiments/492",
+                "--datapath=/media/bryce/nfs/outcome-subset-tournament",
+                "--outdir=tournament"
+            ]
+        },
+        {
             "name": "Train",
             "type": "debugpy",
             "request": "launch",
@@ -15,10 +39,10 @@
             "args": [
                 "--workspace=workspace",
                 "--epoch=10",
-                "--config-file=cfg/train-numpy.yml",
+                "--config-file=cfg/minimap-forecast.yml",
                 "--pbar",
-                "--brief=testing this",
-                "--workers=6"
+                "--brief=testing minimap forecast",
+                "--workers=3"
             ],
             "envFile": "${workspaceFolder}/.env"
         },
