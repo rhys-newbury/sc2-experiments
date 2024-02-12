@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tool for gathering and formatting results"""
 import sqlite3
+import random
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -8,21 +9,21 @@ import numpy as np
 import pandas as pd
 import torch
 import typer
-from konductor.data import Split
+from konductor.data import Split, get_dataset_properties
 from konductor.metadata.database import Metadata
 from konductor.metadata.database.sqlite import DEFAULT_FILENAME, SQLiteDB
 from konductor.metadata.loggers import ParquetLogger
 from konductor.utilities.metadata import update_database
 from konductor.utilities.pbar import LivePbar
 from pyarrow import parquet as pq
-from src.stats import BinaryAcc
-from torch import Tensor
-from utils.eval_helpers import (
+from src.eval_helpers import (
     get_dataloader_with_metadata,
+    metadata_to_str,
     setup_eval_model_and_dataloader,
     write_minimap_forecast_results,
-    metadata_to_str,
 )
+from src.stats import BinaryAcc
+from torch import Tensor
 
 app = typer.Typer()
 
@@ -240,12 +241,16 @@ def visualise_minimap_forecast(
     batch_size: Annotated[int, typer.Option()] = 16,
     split: Annotated[Split, typer.Option()] = Split.VAL,
     n_samples: Annotated[int, typer.Option()] = 16,
+    n_time: Annotated[int, typer.Option()] = 6,
 ):
     """Write images or minimap forecast for konduct review image viewer."""
     exp_config, model, _ = setup_eval_model_and_dataloader(
         run_path, split=split, workers=workers, batch_size=batch_size
     )
     dataloader = get_dataloader_with_metadata(exp_config)
+    timepoints = get_dataset_properties(exp_config)["timepoints"]
+
+    random.seed(0)  # Fix random seed for time_idx sampling
 
     outdir = exp_config.exp_path / "images"
     outdir.mkdir(exist_ok=True)
@@ -253,10 +258,18 @@ def visualise_minimap_forecast(
         for sample_ in dataloader:
             sample: dict[str, Tensor] = sample_[0]
             preds: Tensor = model(sample)
-            write_minimap_forecast_results(preds, sample, outdir)
+            write_minimap_forecast_results(
+                preds, sample, outdir, timepoints.arange(), n_time
+            )
             pbar.update(preds.shape[0])
             if pbar.n >= n_samples:
                 break
+
+    with open(outdir / "samples.txt", "r", encoding="utf-8") as f:
+        filenames = f.readlines()
+    filenames = sorted(set(filenames))
+    with open(outdir / "samples.txt", "w", encoding="utf-8") as f:
+        f.write("".join(filenames))
 
 
 if __name__ == "__main__":
