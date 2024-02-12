@@ -277,27 +277,32 @@ class MinimapSoftIoU(Statistic):
     def from_config(cls, cfg: ExperimentInitConfig, **extras):
         model_cfg = get_model_config(config=cfg)
         data_cfg = get_dataset_properties(cfg)
-        timepoints = data_cfg["timepoints"].arange()
+        if "timepoints" in data_cfg:
+            timepoints = data_cfg["timepoints"].arange()
+        else:
+            timepoints = None
         model_inst = model_cfg.get_instance()
         return cls(model_cfg.history_len, timepoints, model_inst.is_logit_output)
 
     def get_keys(self) -> list[str]:
-        return [
-            f"soft_iou_{t}_{p}"
-            for t, p in itertools.product(self.timepoints, ["self", "enemy"])
-        ]
+        if self.timepoints:
+            return [
+                f"soft_iou_{t}_{p}"
+                for t, p in itertools.product(self.timepoints, ["self", "enemy"])
+            ]
+        return [f"soft_iou_{p}" for p in ["self", "enemy"]]
 
     def __init__(
         self,
         sequence_len: int,
-        timepoints: Sequence[int],
+        timepoints: Sequence[int] | None = None,
         should_sigmoid: bool = True,
         keep_batch: bool = False,
     ) -> None:
         super().__init__()
         self.sequence_len = sequence_len
         self.should_sigmoid = should_sigmoid
-        self.timepoints = timepoints[sequence_len:]
+        self.timepoints = timepoints[sequence_len:] if timepoints else None
         self.keep_batch = keep_batch
 
     @staticmethod
@@ -321,9 +326,11 @@ class MinimapSoftIoU(Statistic):
             soft_iou = MinimapSoftIoU.calculate_soft_iou(
                 predictions[:, idx], next_minimap[:, idx]
             )
-            t = self.timepoints[idx]
-            results[f"soft_iou_{t}_self"] = soft_iou[:, 0]
-            results[f"soft_iou_{t}_enemy"] = soft_iou[:, 1]
+            prefix = "soft_iou_"
+            if self.timepoints:
+                prefix += f"{self.timepoints[idx]}_"
+            results[f"{prefix}_self"] = soft_iou[:, 0]
+            results[f"{prefix}_enemy"] = soft_iou[:, 1]
 
         # TODO Mask out accuracy contrib of parts with invalid sequences
         # valid_mask = get_valid_sequence_mask(targets["valid"], self.sequence_len)

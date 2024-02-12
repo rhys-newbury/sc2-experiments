@@ -1,14 +1,16 @@
+import random
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
+from copy import deepcopy
 from zipfile import BadZipFile
 
 import numpy as np
 from nvidia.dali import fn
 from nvidia.dali.types import SampleInfo, DALIDataType
 from nvidia.dali.data_node import DataNode
-from nvidia.dali.pipeline import pipeline_def, Pipeline
+from nvidia.dali.pipeline import pipeline_def
 import torch
 import yaml
 from konductor.data import (
@@ -22,12 +24,24 @@ from konductor.data import (
 )
 from konductor.data._pytorch.dataloader import DataloaderV1Config
 from konductor.data.dali import DaliLoaderConfig
-from sc2_replay_reader import Result, get_database_and_parser
+from sc2_replay_reader import (
+    Result,
+    get_database_and_parser,
+    ReplayDatabase,
+    ReplayParser,
+    set_replay_database_logger_level,
+    spdlog_lvl,
+)
 from torch.utils.data import Dataset
 
 from ..utils import TimeRange
 from .replay_sampler import SAMPLER_REGISTRY, ReplaySampler
 from .utils import find_closest_indicies, BaseDALIDataset
+
+
+def _min_to_game_step(t: float):
+    """Convert time (min) to game step"""
+    return int(t * 22.4 * 60)
 
 
 class SC2ReplayOutcome(Dataset):
@@ -330,29 +344,203 @@ class DaliFolderDatasetConfig(FolderDatasetConfig):
         return super().from_config(config, idx)
 
     def _get_size(self, split: Split, **kwargs):
-        inst = DaliFolderDataset(
-            self.basepath,
-            split,
-            self.keys,
-            kwargs["batch_size"],
-            kwargs.get("shard_id", 0),
-            kwargs.get("num_shards", 1),
-            False,  # shuffle is irrelevant
-        )
+        inst = DaliFolderDataset(self.basepath, split, self.keys, **kwargs)
         inst._initialize()
         return inst.num_iterations * inst.batch_size
 
     def get_dataloader(self, split: Split) -> Any:
         loader = self.train_loader if split is Split.TRAIN else self.val_loader
-        pipeline = folder_pipeline(
-            path=self.basepath,
-            split=split,
+        source = DaliFolderDataset(
+            path=self.basepath, split=split, keys=self.keys, **loader.pipe_kwargs()
+        )
+        pipeline = sc2_data_pipeline(
+            source=source,
             keys=self.keys,
             fp16_out=self.fp16_out,
             **loader.pipe_kwargs(),
         )
         size = self._get_size(split, **loader.pipe_kwargs())
         return loader.get_instance(pipeline, out_map=self.keys, size=size)
+
+
+class DaliReplayClipDataset(BaseDALIDataset):
+    def __init__(
+        self,
+        sampler_cfg: ModuleInitConfig,
+        start_min: float,
+        end_min: float,
+        step_sec: float,
+        clip_len: int,
+        features: list[str],
+        batch_size: int,
+        shard_id: int,
+        num_shards: int,
+        random_shuffle: bool,
+        metadata: bool = False,
+        minimap_layers: list[str] | None = None,
+    ) -> None:
+        super().__init__(batch_size, shard_id, num_shards, random_shuffle)
+        self.sampler_cfg = sampler_cfg
+        self.sampler: ReplaySampler | None = None
+        self.start_step = _min_to_game_step(start_min)
+        self.end_step = _min_to_game_step(end_min)
+        self.step_size = int(step_sec * 22.4)
+        self.clip_len = clip_len
+        self.metadata = metadata
+        self.features = features
+
+        self.db_handle: ReplayDatabase | None = None
+        self.parser: ReplayParser | None = None
+        self.minimap_layers = minimap_layers
+
+    def _initialize(self):
+        self.sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](**self.sampler_cfg.args)
+        self.db_handle, self.parser = get_database_and_parser(
+            parse_units="unit_features" in self.features,
+            parse_minimaps="minimap_features" in self.features,
+        )
+        if self.minimap_layers is not None:
+            self.parser.setMinimapFeatures(self.minimap_layers)
+        set_replay_database_logger_level(spdlog_lvl.warn)
+        return super()._initialize()
+
+    def __len__(self) -> int:
+        assert self.sampler is not None, "Must be _initialized()"
+        return len(self.sampler)
+
+    def sample_start_time(self, game_steps: list[int]) -> int:
+        """Sample a start time that is within self.timepoints and the current replay"""
+        start = max(self.start_step, game_steps[0])
+        end = min(self.end_step, game_steps[-1] - self.clip_len)
+        return random.randint(start, end)
+
+    def process_replay(self):
+        assert self.parser is not None
+        try:
+            test_sample: dict[str, Any] = self.parser.sample(0)
+        except (RuntimeError, IndexError) as err:
+            raise RuntimeError(f"Parse failure for {self.parser.info}") from err
+
+        outputs_list = {
+            k: []
+            for k in (test_sample.keys() if self.features is None else self.features)
+        }
+
+        sample_indicies = torch.full([self.clip_len], -1, dtype=torch.int32)
+        attempts = 0
+        while (sample_indicies == -1).any():
+            start_idx = self.sample_start_time(self.parser.data.gameStep)
+            end_idx = start_idx + self.clip_len * self.step_size
+            sample_indicies = find_closest_indicies(
+                self.parser.data.gameStep,
+                range(start_idx, end_idx, self.step_size),
+            )
+            attempts += 1
+            if attempts > 50:
+                raise RuntimeError("Maximum iteration attempt exceeded")
+
+        for idx in sample_indicies:
+            sample = self.parser.sample(int(idx.item()))
+            for k in outputs_list:
+                outputs_list[k].append(sample[k])
+
+        outputs = [np.stack(outputs_list[k]) for k in outputs_list]
+
+        if self.metadata:
+            _str = self.parser.info.replayHash + str(self.parser.info.playerId)
+            outputs.append(np.array([ord(c) for c in _str], dtype=np.uint8))
+
+        return outputs
+
+    def __call__(self, sample_info: SampleInfo):
+        assert self.sampler is not None
+        assert self.db_handle is not None
+        assert self.parser is not None
+        # assert all(m is not None for m in ...) does not work for linter
+        sample_idx = super().__call__(sample_info)
+        replay_file, replay_idx = self.sampler.sample(sample_idx)
+        if not self.db_handle.load(replay_file):
+            raise FileNotFoundError(replay_file)
+        replay_data = self.db_handle.getEntry(replay_idx)
+        self.parser.parse_replay(replay_data)
+        outputs = self.process_replay()
+        return outputs
+
+
+@dataclass
+@DATASET_REGISTRY.register_module("dali-replay-clip")
+class DaliReplayClipConfig(DatasetConfig):
+    train_loader: DaliLoaderConfig
+    val_loader: DaliLoaderConfig
+    sampler_cfg: ModuleInitConfig
+    start_min: float
+    end_min: float
+    step_sec: float
+    clip_len: int
+    features: list[str] = field(
+        default_factory=lambda: ["scalar_features", "minimap_features"]
+    )
+    minimap_layers: list[str] | None = field(
+        default_factory=lambda: ["player_relative", "visibility", "creep"]
+    )
+    train_ratio: float = 0.8  # Portion of all data to use for training
+    fp16_out: bool = False
+    metadata: bool = False
+
+    @classmethod
+    def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
+        if "amp" in config.trainer:
+            config.data[idx].dataset.args["fp16_out"] = True
+        return super().from_config(config, idx)
+
+    def __post_init__(self):
+        assert len(self.features) == len(
+            set(self.features)
+        ), f"Duplicate keys in features: {self.features}"
+        if not isinstance(self.sampler_cfg, ModuleInitConfig):
+            self.sampler_cfg = ModuleInitConfig(**self.sampler_cfg)
+
+    @property
+    def properties(self) -> dict[str, Any]:
+        if self.minimap_layers is not None:
+            image_ch = len(self.minimap_layers)
+            if "player_relative" in self.minimap_layers:
+                image_ch += 3
+        else:
+            image_ch = 10
+        ret = {"image_ch": image_ch, "scalar_ch": 28}
+        ret.update(self.__dict__)
+        return ret
+
+    def _make_source(self, split: Split) -> DaliReplayClipDataset:
+        loader = self.train_loader if split is Split.TRAIN else self.val_loader
+        sampler_cfg = deepcopy(self.sampler_cfg)
+        sampler_cfg.args["split"] = split
+        sampler_cfg.args["train_ratio"] = self.train_ratio
+        sampler_cfg.args["replays_path"] = self.basepath
+        source = self.init_auto_filter(
+            DaliReplayClipDataset, sampler_cfg=sampler_cfg, **loader.pipe_kwargs()
+        )
+        return source
+
+    def _get_size(self, split: Split, **kwargs):
+        inst = self._make_source(split)
+        inst._initialize()
+        return inst.num_iterations * inst.batch_size
+
+    def get_dataloader(self, split: Split) -> Any:
+        loader = self.train_loader if split is Split.TRAIN else self.val_loader
+        pipeline = sc2_data_pipeline(
+            source=self._make_source(split),
+            keys=self.features,
+            fp16_out=self.fp16_out,
+            **loader.pipe_kwargs(),
+        )
+        size = self._get_size(split)
+        out_map = deepcopy(self.features)
+        if self.metadata:
+            out_map.append("metadata")
+        return loader.get_instance(pipeline, out_map=out_map, size=size)
 
 
 @dataclass
@@ -363,44 +551,41 @@ class FeatureType:
     should_cast: bool
 
 
+_DTYPES = {
+    "win": FeatureType(DALIDataType.FLOAT, 0, "", False),
+    "valid": FeatureType(DALIDataType.BOOL, 1, "", False),
+    "metadata": FeatureType(DALIDataType.UINT8, 1, "", False),
+    "scalar_features": FeatureType(DALIDataType.FLOAT, 2, "", False),
+    "minimap_features": FeatureType(DALIDataType.FLOAT, 4, "FCHW", True),
+}
+
+
 @pipeline_def(py_start_method="spawn", prefetch_queue_depth=2)
-def folder_pipeline(
+def sc2_data_pipeline(
     shard_id: int,
     num_shards: int,
     random_shuffle: bool,
-    path: Path,
-    split: Split,
+    source: Iterable,
     keys: list[str],
     fp16_out: bool,
     augmentations: list[ModuleInitConfig],
 ):
     """Create pipeline"""
-    pipe = Pipeline.current()
-
-    dtypes = {
-        "win": FeatureType(DALIDataType.FLOAT, 0, "", False),
-        "valid": FeatureType(DALIDataType.BOOL, 1, "", False),
-        "metadata": FeatureType(DALIDataType.UINT8, 1, "", False),
-        "scalar_features": FeatureType(DALIDataType.FLOAT, 2, "", False),
-        "minimap_features": FeatureType(DALIDataType.FLOAT, 4, "FCHW", True),
-    }
     outputs = fn.external_source(
-        source=DaliFolderDataset(
-            path, split, keys, pipe.max_batch_size, shard_id, num_shards, random_shuffle
-        ),
+        source=source,
         num_outputs=len(keys),
         parallel=True,
         batch=False,
-        dtype=[dtypes[k].dtype for k in keys],
-        ndim=[dtypes[k].ndim for k in keys],
+        dtype=[_DTYPES[k].dtype for k in keys],
+        ndim=[_DTYPES[k].ndim for k in keys],
     )
 
     def transform(data: DataNode, key: str):
         """Move data to gpu and cast to fp16 if enabled"""
         data = data.gpu()
         if (
-            dtypes[key].dtype == DALIDataType.FLOAT
-            and dtypes[key].should_cast
+            _DTYPES[key].dtype == DALIDataType.FLOAT
+            and _DTYPES[key].should_cast
             and fp16_out
         ):
             return fn.cast(data, dtype=DALIDataType.FLOAT16)

@@ -126,7 +126,7 @@ class ConvForecaster(nn.Module):
         minimaps = inputs["minimap_features"]
         ntime = minimaps.shape[1]
         preds: list[Tensor] = []
-        for start_idx in range(ntime - self.history_len):
+        for start_idx in range(ntime - self.history_len + 1):
             end_idx = start_idx + self.history_len
             pred = self.forward_sequence(minimaps[:, start_idx:end_idx])
             pred = F.interpolate(
