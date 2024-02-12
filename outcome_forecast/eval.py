@@ -11,6 +11,8 @@ import torch
 import typer
 from konductor.data import Split, get_dataset_properties
 from konductor.metadata.database import Metadata
+from konductor.utilities.pbar import IntervalPbar
+
 from konductor.metadata.database.sqlite import DEFAULT_FILENAME, SQLiteDB
 from konductor.metadata.loggers import ParquetLogger
 from konductor.utilities.metadata import update_database
@@ -109,7 +111,9 @@ def evaluate(
 
     meta = Metadata.from_yaml(run_path / "metadata.yaml")
 
-    with LivePbar(total=len(dataloader)) as pbar, torch.inference_mode():
+    with IntervalPbar(
+        total=len(dataloader), fraction=0.1
+    ) as pbar, torch.inference_mode():
         for sample in dataloader:
             if isinstance(sample, list):
                 sample = sample[0]
@@ -148,7 +152,9 @@ def evaluate_percent(
     total_results = torch.zeros((2, num_buckets), device="cuda")
     interval = 100 / num_buckets
 
-    with LivePbar(total=len(dataloader)) as pbar, torch.inference_mode():
+    with IntervalPbar(
+        total=len(dataloader), fraction=0.1
+    ) as pbar, torch.inference_mode():
         for sample in dataloader:
             if isinstance(sample, list):
                 sample = sample[0]
@@ -158,15 +164,19 @@ def evaluate_percent(
             metadata = metadata_to_str(sample["metadata"])
 
             replayHash, playerId = [x[:-1] for x in metadata], [x[-1] for x in metadata]
-            query = "SELECT game_length FROM 'game_data' where " + " OR ".join(
-                [
-                    f'(replayHash = "{rh}" AND playerId = {pId})'
-                    for rh, pId in zip(replayHash, playerId)
-                ]
+            query = (
+                "SELECT replayHash, game_length FROM 'game_data' where "
+                + " OR ".join(
+                    [
+                        f'(replayHash = "{rh}" AND playerId = {pId})'
+                        for rh, pId in zip(replayHash, playerId)
+                    ]
+                )
             )
             cursor.execute(query)
+            rg_map = {x[0]: x[1] for x in cursor.fetchall()}
             game_length = torch.tensor(
-                [x[0] for x in cursor.fetchall()], device=preds.device
+                [rg_map[rh] for rh in replayHash], device=preds.device
             )
             game_length_mins = game_length / 22.4 / 60
 
@@ -174,20 +184,23 @@ def evaluate_percent(
                 time_point = float(k.split("_")[-1])
                 percent = 100 * time_point / game_length_mins
 
-                idx_mask = (percent // interval).type(torch.int64)
                 mask = torch.logical_and(
-                    sample["valid"][:, idx].type(torch.bool), percent <= 100
+                    sample["valid"][:, idx].type(torch.bool), percent < 100
                 )
 
                 corrects = results[k][mask]
 
-                values, counts = torch.unique(
-                    idx_mask[mask][corrects.type(torch.bool)], return_counts=True
-                )
-                total_results[0, values] += counts
+                if mask.sum() > 0:
+                    idx_mask = (percent // interval).type(torch.int64)
 
-                values, counts = torch.unique(idx_mask[mask], return_counts=True)
-                total_results[1, values] += counts
+                    values, counts = torch.unique(
+                        idx_mask[mask][corrects.type(torch.bool)], return_counts=True
+                    )
+
+                    total_results[0, values] += counts
+
+                    values, counts = torch.unique(idx_mask[mask], return_counts=True)
+                    total_results[1, values] += counts
 
             pbar.update(1)
 

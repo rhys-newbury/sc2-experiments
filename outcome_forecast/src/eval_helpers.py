@@ -125,7 +125,7 @@ def write_minimap_forecast_results(
     """
     Write minimap forecast predictions for konduct review image viewer.
     The history sequence length and thus association between prediction and
-    ground truth time indicies is infered from the time dimension of the
+    ground truth time indices is inferred from the time dimension of the
     prediction which is full_sequence - history_length.
     """
     predFolder = outdir / "pred"

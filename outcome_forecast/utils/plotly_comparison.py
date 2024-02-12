@@ -117,9 +117,9 @@ def update_col_graph(metric: str, root: str):
 
     # Update layout for better readability (optional)
     fig.update_layout(
-        title_text="Column Chart of Tuples",
-        xaxis_title="Column Name",
-        yaxis_title="Value",
+        title_text=f"Results over time={metric}",
+        xaxis_title="Brief",
+        yaxis_title="Accuracy (%)",
     )
 
     return fig
@@ -163,7 +163,9 @@ def update_line_graph(root: str):
 
     # Update layout for better readability (optional)
     fig.update_layout(
-        title_text="Line Chart of Tuples", xaxis_title="Index", yaxis_title="Values"
+        title_text="Results over game length",
+        xaxis_title="Time (minutes)",
+        yaxis_title="Accuracy (%)",
     )
 
     return fig
