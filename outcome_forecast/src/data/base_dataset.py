@@ -456,7 +456,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         assert self.sampler is not None
         assert self.db_handle is not None
         assert self.parser is not None
-        # assert all(m is not None for m in ...) does not work for linter
+        # LSP doesn't recognise 'assert all(m is not None for m in ...)'
         sample_idx = super().__call__(sample_info)
         replay_file, replay_idx = self.sampler.sample(sample_idx)
         if not self.db_handle.load(replay_file):

@@ -1,6 +1,7 @@
 """
 Data transform utilities
 """
+
 from pathlib import Path
 
 import numpy as np
@@ -16,13 +17,46 @@ from konductor.utilities.pbar import LivePbar, IntervalPbar
 app = typer.Typer()
 
 
-def convert_split(outfolder: Path, dataloader, live: bool):
-    """Run conversion and write to outfolder"""
+def get_dataset_config_for_data_transform(config_file: Path, workers: int):
+    """Returns configured dataset and original configuration dictionary"""
+    with open(config_file, "r", encoding="utf-8") as f:
+        loaded_dict = yaml.safe_load(f)
+        if "dataset" in loaded_dict:  # Unwrap if normal experiment config
+            loaded_dict = loaded_dict["dataset"]
+
+    init_config = DatasetInitConfig.from_dict(loaded_dict)
+    dataset_cfg = make_from_init_config(init_config)
+
+    # Return metadata to save as filename
+    dataset_cfg.metadata = True
+    # Set dataloader workers
+    dataset_cfg.train_loader.workers = workers
+    dataset_cfg.val_loader.workers = workers
+    # Enforce batch size of 1
+    dataset_cfg.train_loader.batch_size = 1
+    dataset_cfg.val_loader.batch_size = 1
+
+    return dataset_cfg, loaded_dict
+
+
+def save_dataset_configuration(config_dict: dict[str, object], outfolder: Path):
+    """Saves configuration to outfolder for traceability"""
+    with open(outfolder / "generation-config.yml", "w", encoding="utf-8") as f:
+        yaml.dump(config_dict, f)
+
+
+def make_pbar(dataloader, desc: str, live: bool):
+    """Make pbar live or fraction depending on flag"""
     pbar_type = LivePbar if live else IntervalPbar
-    pbar_kwargs = {"total": len(dataloader), "desc": outfolder.stem}
+    pbar_kwargs = {"total": len(dataloader), "desc": desc}
     if not live:
         pbar_kwargs["fraction"] = 0.1
-    with pbar_type(**pbar_kwargs) as pbar:
+    return pbar_type(**pbar_kwargs)
+
+
+def convert_to_numpy_files(outfolder: Path, dataloader, live: bool):
+    """Run conversion and write to outfolder"""
+    with make_pbar(dataloader, outfolder.stem, live) as pbar:
         for sample in dataloader:
             # Unwrap batch dim and change torch tensor to numpy array
             formatted: dict[str, str | np.ndarray] = {}
@@ -52,33 +86,48 @@ def make_numpy_subset(
         output (Path): Root folder to save new dataset
         workers (int): Number of dataloader workers to use
     """
-    with open(config, "r", encoding="utf-8") as f:
-        loaded_dict = yaml.safe_load(f)
-        if "dataset" in loaded_dict:  # Unwrap if normal experiment config
-            loaded_dict = loaded_dict["dataset"]
-
-    init_config = DatasetInitConfig.from_dict(loaded_dict)
-    dataset_cfg = make_from_init_config(init_config)
-
-    # Return metadata to save as filename
-    dataset_cfg.metadata = True
-    # Set dataloader workers
-    dataset_cfg.train_loader.workers = workers
-    dataset_cfg.val_loader.workers = workers
-    # Enforce batch size of 1
-    dataset_cfg.train_loader.batch_size = 1
-    dataset_cfg.val_loader.batch_size = 1
+    dataset_cfg, loaded_dict = get_dataset_config_for_data_transform(config, workers)
 
     # Create output root and copy configuration for traceability
     output.mkdir(exist_ok=True)
-    with open(output / "generation-config.yml", "w", encoding="utf-8") as f:
-        yaml.dump(loaded_dict, f)
+    save_dataset_configuration(loaded_dict, output)
 
     for split in [Split.TRAIN, Split.VAL]:
         dataloader = dataset_cfg.get_dataloader(split)
         outsubfolder = output / split.name.lower()
         outsubfolder.mkdir(exist_ok=True)
-        convert_split(outsubfolder, dataloader, live)
+        convert_to_numpy_files(outsubfolder, dataloader, live)
+
+
+def convert_minimaps_to_videos(outfolder: Path, dataloader, live: bool):
+    """Write each minimap sequence as a video file"""
+    with make_pbar(dataloader, outfolder.stem, live) as pbar:
+        for sample_ in dataloader:
+            sample = sample_[0] if isinstance(sample, list) else sample_
+            pbar.update(1)
+
+
+@app.command()
+def make_minimap_videos(
+    config: Annotated[Path, typer.Option()],
+    output: Annotated[Path, typer.Option()],
+    workers: Annotated[int, typer.Option()] = 4,
+    live: Annotated[bool, typer.Option(help="Use live pbar")] = False,
+):
+    """
+    Reading a few frames from a SC2Replay is a bit wasteful, perhaps
+    using the native DALI videoreader could perhaps be faster.
+    """
+    dataset_cfg, loaded_dict = get_dataset_config_for_data_transform(config, workers)
+
+    output.mkdir(exist_ok=True)
+    save_dataset_configuration(loaded_dict, output)
+
+    for split in [Split.TRAIN, Split.VAL]:
+        dataloader = dataset_cfg.get_dataloader(split)
+        outsubfolder = output / split.name.lower()
+        outsubfolder.mkdir(exist_ok=True)
+        convert_minimaps_to_videos(outsubfolder, dataloader, live)
 
 
 if __name__ == "__main__":
