@@ -343,23 +343,30 @@ class DaliFolderDatasetConfig(FolderDatasetConfig):
             config.data[idx].dataset.args["fp16_out"] = True
         return super().from_config(config, idx)
 
-    def _get_size(self, split: Split, **kwargs):
-        inst = DaliFolderDataset(self.basepath, split, self.keys, **kwargs)
+    def _make_source(self, split: Split) -> DaliFolderDataset:
+        loader = self.train_loader if split is Split.TRAIN else self.val_loader
+        source = self.init_auto_filter(
+            DaliFolderDataset,
+            path=self.basepath,
+            split=split,
+            **loader.pipe_kwargs(),
+        )
+        return source
+
+    def _get_size(self, split: Split):
+        inst = self._make_source(split)
         inst._initialize()
         return inst.num_iterations * inst.batch_size
 
     def get_dataloader(self, split: Split) -> Any:
         loader = self.train_loader if split is Split.TRAIN else self.val_loader
-        source = DaliFolderDataset(
-            path=self.basepath, split=split, keys=self.keys, **loader.pipe_kwargs()
-        )
         pipeline = sc2_data_pipeline(
-            source=source,
+            source=self._make_source(split),
             keys=self.keys,
             fp16_out=self.fp16_out,
             **loader.pipe_kwargs(),
         )
-        size = self._get_size(split, **loader.pipe_kwargs())
+        size = self._get_size(split)
         return loader.get_instance(pipeline, out_map=self.keys, size=size)
 
 
@@ -523,7 +530,7 @@ class DaliReplayClipConfig(DatasetConfig):
         )
         return source
 
-    def _get_size(self, split: Split, **kwargs):
+    def _get_size(self, split: Split):
         inst = self._make_source(split)
         inst._initialize()
         return inst.num_iterations * inst.batch_size
