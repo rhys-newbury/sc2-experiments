@@ -34,7 +34,7 @@ def get_valid_sequence_mask(valid: Tensor, sequence_len: int):
     """
     is_valid: list[Tensor] = []
     n_time = valid.shape[1]
-    for start_idx in range(n_time - sequence_len):
+    for start_idx in range(n_time - sequence_len + 1):
         end_idx = start_idx + sequence_len
         is_valid.append(valid[:, start_idx:end_idx].all(dim=1))
     return torch.stack(is_valid, dim=1)

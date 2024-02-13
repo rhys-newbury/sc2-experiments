@@ -1,15 +1,17 @@
 """Common helper functions for evaluation"""
 
+import math
 import random
 from pathlib import Path
 
 import cv2
 import torch
 from torch import nn, Tensor
+from torch.nn import functional as F
 from konductor.data import Split, get_dataset_config
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model
-from .utils import get_valid_sequence_mask, TimeRange
+from .utils import get_valid_sequence_mask
 
 
 def metadata_to_str(metadata: Tensor) -> list[str]:
@@ -115,6 +117,50 @@ def write_minimaps(
         )
 
 
+def get_upper_left_coord(idx: int, grid_size: int, tile_size: int):
+    """
+    Get pixel coordinates of upper left of tile at index
+    Returns (h,w)
+    """
+    row, col = divmod(idx, grid_size)
+    assert row <= grid_size and col <= grid_size, f"Tile {idx=} out of bounds"
+    return row * tile_size, col * tile_size
+
+
+def write_tiled_sequence(
+    data: Tensor,
+    timepoint: float,
+    end_idx: int,
+    seq_len: int,
+    folder: Path,
+    prefix: str,
+):
+    """Write the historicalsequence and target frame"""
+    dataFolder = folder / "data"
+    im_size = 1024
+    grid_size = int(math.ceil(math.sqrt(seq_len)))
+    tile_size = im_size // grid_size
+    data = (255 * (1 - data)).to(torch.uint8)
+    for ch_idx, name in enumerate(["self", "enemy"]):
+        base_image = torch.full(
+            [im_size, im_size], 255, dtype=torch.uint8, device=data.device
+        )
+        for idx, t_idx in enumerate(range(end_idx + 1 - seq_len, end_idx + 1)):
+            data_time: Tensor = F.interpolate(
+                data[t_idx, ch_idx, None, None],
+                size=(tile_size, tile_size),
+                mode="nearest",
+            )
+            px_y, px_x = get_upper_left_coord(idx, grid_size, tile_size)
+            base_image[px_y : px_y + tile_size, px_x : px_x + tile_size] = data_time[
+                0, 0
+            ]
+        cv2.imwrite(
+            str(dataFolder / f"{prefix}_{timepoint}_{name}_seq.png"),
+            base_image.cpu().numpy(),
+        )
+
+
 def write_minimap_forecast_results(
     preds: Tensor,
     data: dict[str, Tensor],
@@ -137,25 +183,34 @@ def write_minimap_forecast_results(
 
     targets = data["minimap_features"][:, :, [-4, -1]]
     sequence_len = targets.shape[1] - preds.shape[1]
-    valid_seq = get_valid_sequence_mask(data["valid"], sequence_len)
+    valid_seq = get_valid_sequence_mask(data["valid"], sequence_len + 1)
     pred_sig = preds.sigmoid()
     timepoints = timepoints.to(preds.device)
 
+    indicies = torch.arange(valid_seq.shape[1], device=valid_seq.device) + sequence_len
+
     for bidx in range(preds.shape[0]):
         prefix = metadata[bidx]
-        valid_mask = valid_seq[bidx]
-        valid_time = timepoints[sequence_len:][valid_mask]
-        valid_pred = pred_sig[bidx][valid_mask]
-        valid_tgt = targets[bidx, sequence_len:][valid_mask]
-
         # Only get a few random samples
-        rand_idx = list(range(valid_mask.sum()))
-        random.shuffle(rand_idx)
-        rand_idx = rand_idx[:n_time]
+        rand_idxs = [i.item() for i in indicies[valid_seq[bidx]].cpu()]
+        random.shuffle(rand_idxs)
+        rand_idxs = rand_idxs[:n_time]
 
-        for idx in rand_idx:
+        for idx in rand_idxs:
             write_minimaps(
-                valid_pred[idx], valid_tgt[idx], valid_time[idx].item(), outdir, prefix
+                pred_sig[bidx, idx - sequence_len],
+                targets[bidx, idx],
+                timepoints[idx].item(),
+                outdir,
+                prefix,
+            )
+            write_tiled_sequence(
+                targets[bidx],
+                timepoints[idx].item(),
+                idx,
+                sequence_len + 1,  # Include last item
+                outdir,
+                prefix,
             )
 
     with open(outdir / "samples.txt", "a") as f:
