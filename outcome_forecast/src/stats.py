@@ -302,7 +302,7 @@ class MinimapSoftIoU(Statistic):
         super().__init__()
         self.sequence_len = sequence_len
         self.should_sigmoid = should_sigmoid
-        self.timepoints = timepoints[sequence_len:] if timepoints else None
+        self.timepoints = timepoints[sequence_len:] if timepoints is not None else None
         self.keep_batch = keep_batch
 
     @staticmethod
