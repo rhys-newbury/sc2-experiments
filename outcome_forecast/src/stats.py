@@ -285,7 +285,7 @@ class MinimapSoftIoU(Statistic):
         return cls(model_cfg.history_len, timepoints, model_inst.is_logit_output)
 
     def get_keys(self) -> list[str]:
-        if self.timepoints:
+        if self.timepoints is not None:
             return [
                 f"soft_iou_{t}_{p}"
                 for t, p in itertools.product(self.timepoints, ["self", "enemy"])
@@ -295,7 +295,7 @@ class MinimapSoftIoU(Statistic):
     def __init__(
         self,
         sequence_len: int,
-        timepoints: Sequence[int] | None = None,
+        timepoints: Sequence[float] | None = None,
         should_sigmoid: bool = True,
         keep_batch: bool = False,
     ) -> None:
