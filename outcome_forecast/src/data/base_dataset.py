@@ -19,7 +19,7 @@ from konductor.data import (
     make_from_init_config,
 )
 from konductor.data._pytorch.dataloader import DataloaderV1Config
-from konductor.data.dali import DaliLoaderConfig
+from konductor.data.dali import DaliLoaderConfig, DALI_AUGMENTATIONS
 from nvidia.dali import fn
 from nvidia.dali.data_node import DataNode
 from nvidia.dali.pipeline import pipeline_def
@@ -644,7 +644,14 @@ _DTYPES = {
 }
 
 
-@pipeline_def(py_start_method="spawn", prefetch_queue_depth=2)
+def apply_minimap_augs(minimaps: DataNode, augs: list[ModuleInitConfig]):
+    """Apply list of augmentations to minimaps"""
+    for aug in augs:
+        minimaps = DALI_AUGMENTATIONS[aug.type](minimaps, **aug.args)
+    return minimaps
+
+
+@pipeline_def(py_start_method="spawn", prefetch_queue_depth=2, enable_conditionals=True)
 def sc2_data_pipeline(
     shard_id: int,
     num_shards: int,
@@ -664,6 +671,10 @@ def sc2_data_pipeline(
         dtype=[_DTYPES[k].dtype for k in keys],
         ndim=[_DTYPES[k].ndim for k in keys],
     )
+
+    if len(augmentations) != 0:
+        minimap_idx = keys.index("minimap_features")
+        outputs[minimap_idx] = apply_minimap_augs(outputs[minimap_idx], augmentations)
 
     def transform(data: DataNode, key: str):
         """Move data to gpu and cast to fp16 if enabled"""

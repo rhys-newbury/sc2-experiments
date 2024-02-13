@@ -2,7 +2,7 @@
 
 from konductor.data.dali import DALI_AUGMENTATIONS
 from nvidia.dali import fn
-from nvidia.dali.types import DALIDataType
+from nvidia.dali.types import DALIDataType, DALIInterpType
 from nvidia.dali.data_node import DataNode
 
 
@@ -17,6 +17,15 @@ def random_flip(minimaps: DataNode, vertical: bool = True, horizontal: bool = Tr
 
 
 @DALI_AUGMENTATIONS.register_module("random-rotate")
-def random_rotate(minimaps: DataNode, angle: float):
-    rand_angle = fn.random.uniform(range=[-angle, angle], dtype=DALIDataType.FLOAT)
-    minimaps = fn.rotate(minimaps, angle=rand_angle)
+def random_rotate(minimaps: DataNode, angle_deg: float):
+    rand_angle = fn.random.uniform(
+        range=[-angle_deg, angle_deg], dtype=DALIDataType.FLOAT
+    )
+    minimaps = fn.rotate(
+        minimaps,
+        angle=rand_angle,
+        fill_value=0,
+        interp_type=DALIInterpType.INTERP_NN,
+        keep_size=True,
+    )
+    return minimaps
