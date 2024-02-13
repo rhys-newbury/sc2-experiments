@@ -118,8 +118,9 @@ class MinimapFocal(nn.BCEWithLogitsLoss):
         loss_mask = self._focal_loss(predictions, next_minimap)
         loss_sequence = loss_mask.mean(dim=(-1, -2, -3))
 
-        valid_seq = get_valid_sequence_mask(targets["valid"], self.history_len + 1)
-        loss_sequence *= valid_seq
+        if "valid" in targets:
+            valid_seq = get_valid_sequence_mask(targets["valid"], self.history_len + 1)
+            loss_sequence *= valid_seq
 
         return {"minimap-focal": loss_sequence.mean()}
 

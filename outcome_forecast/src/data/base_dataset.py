@@ -458,7 +458,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         self.start_step = _min_to_game_step(start_min)
         self.end_step = _min_to_game_step(end_min)
         self.step_size = int(step_sec * 22.4)
-        self.clip_len = clip_len
+        self.clip_len = clip_len + 1  # Need to yield frame after history
         self.metadata = metadata
         self.features = features
 

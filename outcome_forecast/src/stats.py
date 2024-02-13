@@ -326,9 +326,9 @@ class MinimapSoftIoU(Statistic):
             soft_iou = MinimapSoftIoU.calculate_soft_iou(
                 predictions[:, idx], next_minimap[:, idx]
             )
-            prefix = "soft_iou_"
+            prefix = "soft_iou"
             if self.timepoints:
-                prefix += f"{self.timepoints[idx]}_"
+                prefix += f"_{self.timepoints[idx]}"
             results[f"{prefix}_self"] = soft_iou[:, 0]
             results[f"{prefix}_enemy"] = soft_iou[:, 1]
 
