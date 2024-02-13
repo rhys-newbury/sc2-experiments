@@ -5,7 +5,7 @@ from typing import Sequence
 
 import numpy as np
 import torch
-from nvidia.dali import types
+from nvidia.dali.types import SampleInfo, BatchInfo
 from torch import Tensor
 
 
@@ -58,6 +58,8 @@ def gen_val_query(database: Path, sql_filters: list[str] | None):
 class BaseDALIDataset:
     """External Iterator for DALI"""
 
+    should_batch = False
+
     def __init__(
         self,
         batch_size: int,
@@ -90,21 +92,27 @@ class BaseDALIDataset:
     def num_iterations(self):
         return len(self) // self.num_shards // self.batch_size
 
-    def resample_indicies(self, sample_info: types.SampleInfo):
-        self.last_seen_epoch = sample_info.epoch_idx
-        self.idx_samples = np.random.default_rng(
-            seed=42 + sample_info.epoch_idx
-        ).permutation(len(self))
+    def resample_indicies(self, epoch_idx: int):
+        self.last_seen_epoch = epoch_idx
+        self.idx_samples = np.random.default_rng(seed=42 + epoch_idx).permutation(
+            len(self)
+        )
 
-    def __call__(self, sample_info: types.SampleInfo) -> int:
+    def __call__(self, yield_info: SampleInfo | BatchInfo) -> int:
         if len(self) == 0:
             self._initialize()
 
-        if sample_info.iteration >= self.num_iterations:
+        if yield_info.iteration >= self.num_iterations:
             raise StopIteration
 
-        if self.random_shuffle and sample_info.epoch_idx != self.last_seen_epoch:
-            self.resample_indicies(sample_info)
+        if self.random_shuffle and yield_info.epoch_idx != self.last_seen_epoch:
+            self.resample_indicies(yield_info.epoch_idx)
 
-        idx = sample_info.idx_in_epoch + self.shard_id
+        idx = self.shard_id
+        idx += (
+            yield_info.idx_in_epoch
+            if isinstance(yield_info, SampleInfo)
+            else yield_info.iteration
+        )
+
         return self.idx_samples[idx].item()

@@ -23,7 +23,7 @@ from konductor.data.dali import DaliLoaderConfig
 from nvidia.dali import fn
 from nvidia.dali.data_node import DataNode
 from nvidia.dali.pipeline import pipeline_def
-from nvidia.dali.types import DALIDataType, SampleInfo
+from nvidia.dali.types import DALIDataType, SampleInfo, BatchInfo
 from sc2_replay_reader import (
     ReplayDatabase,
     ReplayParser,
@@ -344,6 +344,8 @@ class FolderDatasetConfig(DatasetConfig):
 
 
 class DaliFolderDataset(BaseDALIDataset):
+    should_batch = False
+
     def __init__(
         self,
         path: Path,
@@ -449,6 +451,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         shard_id: int,
         num_shards: int,
         random_shuffle: bool,
+        should_batch: bool = False,
         metadata: bool = False,
         minimap_layers: list[str] | None = None,
     ) -> None:
@@ -465,6 +468,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         self.db_handle: ReplayDatabase | None = None
         self.parser: ReplayParser | None = None
         self.minimap_layers = minimap_layers
+        self.should_batch = should_batch
 
     def _initialize(self):
         self.sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](**self.sampler_cfg.args)
@@ -525,7 +529,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
 
         return outputs
 
-    def __call__(self, sample_info: SampleInfo):
+    def __call__(self, sample_info: SampleInfo | BatchInfo):
         assert self.sampler is not None
         assert self.db_handle is not None
         assert self.parser is not None
@@ -536,7 +540,13 @@ class DaliReplayClipDataset(BaseDALIDataset):
             raise FileNotFoundError(replay_file)
         replay_data = self.db_handle.getEntry(replay_idx)
         self.parser.parse_replay(replay_data)
-        outputs = self.process_replay()
+        if self.should_batch:
+            samples = [self.process_replay() for _ in range(self.batch_size)]
+            outputs = []
+            for idx in range(len(samples[0])):
+                outputs.append(np.stack([s[idx] for s in samples]))
+        else:
+            outputs = self.process_replay()
         return outputs
 
 
@@ -559,6 +569,7 @@ class DaliReplayClipConfig(DatasetConfig):
     train_ratio: float = 0.8  # Portion of all data to use for training
     fp16_out: bool = False
     metadata: bool = False
+    should_batch: bool = False
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
@@ -638,7 +649,7 @@ def sc2_data_pipeline(
     shard_id: int,
     num_shards: int,
     random_shuffle: bool,
-    source: Iterable,
+    source: BaseDALIDataset,
     keys: list[str],
     fp16_out: bool,
     augmentations: list[ModuleInitConfig],
@@ -648,7 +659,8 @@ def sc2_data_pipeline(
         source=source,
         num_outputs=len(keys),
         parallel=True,
-        batch=False,
+        batch=source.should_batch,
+        batch_info=source.should_batch,
         dtype=[_DTYPES[k].dtype for k in keys],
         ndim=[_DTYPES[k].ndim for k in keys],
     )
