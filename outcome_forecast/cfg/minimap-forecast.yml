@@ -1,20 +1,38 @@
 dataset:
-  - type: dali-folder
+  - type: dali-replay-clip
     args:
-      keys: [valid, minimap_features]
+      start_min: 2
+      end_min: 20
+      step_sec: 10
+      clip_len: 8
+      features: ["minimap_features"]
+      should_batch: true
+      sampler_cfg:
+        type: sql
+        args:
+          database: $ENV:gamedata.db
+          filter_query:
+            - game_length > 6720
+            - read_success = 1
+            - parse_success = 1
+            - number_game_step > 512
     val_loader:
       type: DALI
       args:
-        batch_size: 32
+        batch_size: 64
         drop_last: true
     train_loader:
       type: DALI
       args:
         shuffle: true
-        batch_size: 16
+        batch_size: 64
         drop_last: true
+        augmentations:
+          - type: random-rotate
+            args:
+              angle_deg: 180
 criterion:
-  - type: minimap-bce
+  - type: minimap-focal
     args: {}
 model:
   - type: conv-forecast-v1
@@ -30,7 +48,7 @@ model:
         type: temporal-conv
         args:
           hidden_ch: 32
-          out_ch: 64
+          out_ch: 32
       decoder:
         type: aspp-decoder
         args:
