@@ -3,16 +3,20 @@ Data transform utilities
 """
 
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import typer
 import yaml
-from konductor.init import DatasetInitConfig
 from konductor.data import make_from_init_config
-from src.data.base_dataset import Split
+from konductor.init import DatasetInitConfig
+from konductor.registry import Registry
+from konductor.utilities.pbar import IntervalPbar, LivePbar
 from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
+from src.data.base_dataset import Split
+from src.utils import StrEnum
+from torch import Tensor
 from typing_extensions import Annotated
-from konductor.utilities.pbar import LivePbar, IntervalPbar
 
 app = typer.Typer()
 
@@ -99,18 +103,38 @@ def make_numpy_subset(
         convert_to_numpy_files(outsubfolder, dataloader, live)
 
 
-def convert_minimaps_to_videos(outfolder: Path, dataloader, live: bool):
+WriterFn = Callable[[Tensor, Path], None]
+
+
+def convert_minimaps_to_videos(
+    outfolder: Path, dataloader, live: bool, writer: WriterFn
+):
     """Write each minimap sequence as a video file"""
     with make_pbar(dataloader, outfolder.stem, live) as pbar:
         for sample_ in dataloader:
-            sample = sample_[0] if isinstance(sample, list) else sample_
+            sample = sample_[0] if isinstance(sample_, list) else sample_
+            outpath = outfolder / sample["metadata"]
+            writer(sample["minimap_features"], outpath)
             pbar.update(1)
+
+
+WRITER_REGISTRY = Registry("video-writer")
+
+
+@WRITER_REGISTRY.register_module()
+def self_enemy_heightmap(minimap_seq: Tensor, writepath: Path):
+    """Write video with three channels [self, enemy, heightmap]"""
+    pass
+
+
+WriterType = StrEnum("WriterType", list(WRITER_REGISTRY.module_dict))
 
 
 @app.command()
 def make_minimap_videos(
     config: Annotated[Path, typer.Option()],
     output: Annotated[Path, typer.Option()],
+    writer: Annotated[WriterType, typer.Option()],
     workers: Annotated[int, typer.Option()] = 4,
     live: Annotated[bool, typer.Option(help="Use live pbar")] = False,
 ):
@@ -123,11 +147,13 @@ def make_minimap_videos(
     output.mkdir(exist_ok=True)
     save_dataset_configuration(loaded_dict, output)
 
+    writer_func: WriterFn = WRITER_REGISTRY[writer]
+
     for split in [Split.TRAIN, Split.VAL]:
         dataloader = dataset_cfg.get_dataloader(split)
         outsubfolder = output / split.name.lower()
         outsubfolder.mkdir(exist_ok=True)
-        convert_minimaps_to_videos(outsubfolder, dataloader, live)
+        convert_minimaps_to_videos(outsubfolder, dataloader, live, writer_func)
 
 
 if __name__ == "__main__":

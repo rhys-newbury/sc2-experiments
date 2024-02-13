@@ -1,42 +1,43 @@
-import random
 import logging
+import random
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
-from copy import deepcopy
 from zipfile import BadZipFile
 
 import numpy as np
-from nvidia.dali import fn
-from nvidia.dali.types import SampleInfo, DALIDataType
-from nvidia.dali.data_node import DataNode
-from nvidia.dali.pipeline import pipeline_def
 import torch
 import yaml
 from konductor.data import (
     DATASET_REGISTRY,
     DatasetConfig,
+    DatasetInitConfig,
     ExperimentInitConfig,
     ModuleInitConfig,
     Split,
-    DatasetInitConfig,
     make_from_init_config,
 )
 from konductor.data._pytorch.dataloader import DataloaderV1Config
 from konductor.data.dali import DaliLoaderConfig
+from nvidia.dali import fn
+from nvidia.dali.data_node import DataNode
+from nvidia.dali.pipeline import pipeline_def
+from nvidia.dali.types import DALIDataType, SampleInfo
 from sc2_replay_reader import (
-    Result,
-    get_database_and_parser,
     ReplayDatabase,
     ReplayParser,
+    Result,
+    get_database_and_parser,
     set_replay_database_logger_level,
     spdlog_lvl,
 )
+from torch import Tensor
 from torch.utils.data import Dataset
 
 from ..utils import TimeRange
 from .replay_sampler import SAMPLER_REGISTRY, ReplaySampler
-from .utils import find_closest_indicies, BaseDALIDataset
+from .utils import BaseDALIDataset, find_closest_indicies
 
 
 def _min_to_game_step(t: float):
@@ -44,7 +45,48 @@ def _min_to_game_step(t: float):
     return int(t * 22.4 * 60)
 
 
-class SC2ReplayOutcome(Dataset):
+class SC2ReplayBase(Dataset):
+    def __init__(
+        self, sampler: ReplaySampler, features: set[str] | None, metadata: bool = False
+    ):
+        super().__init__()
+        self.sampler = sampler
+        self.features = features
+        self.metadata = metadata
+        self.logger = logging.getLogger("replay-dataset")
+        if features is not None:
+            self.db_handle, self.parser = get_database_and_parser(
+                parse_units="unit_features" in features,
+                parse_minimaps="minimap_features" in features,
+            )
+        else:
+            self.db_handle, self.parser = get_database_and_parser(
+                parse_units=True, parse_minimaps=True
+            )
+
+    def __len__(self) -> int:
+        return len(self.sampler)
+
+    def process_replay(self):
+        raise NotImplementedError
+
+    def __getitem__(self, index: int):
+        replay_file, replay_idx = self.sampler.sample(index)
+        if not self.db_handle.load(replay_file):
+            raise FileNotFoundError(replay_file)
+        replay_data = self.db_handle.getEntry(replay_idx)
+        self.parser.parse_replay(replay_data)
+        outputs = self.process_replay()
+
+        if self.metadata:
+            outputs["metadata"] = self.parser.info.replayHash + str(
+                self.parser.info.playerId
+            )
+
+        return outputs
+
+
+class SC2ReplayOutcome(SC2ReplayBase):
     def __init__(
         self,
         sampler: ReplaySampler,
@@ -54,23 +96,7 @@ class SC2ReplayOutcome(Dataset):
         minimap_layers: list[str] | None = None,
         min_game_time: float | None = None,
     ) -> None:
-        super().__init__()
-        self.sampler = sampler
-        self.features = features
-        self.metadata = metadata
-        self.logger = logging.getLogger("replay-dataset")
-        if self.features is None or "unit_features" in self.features:
-            self.db_handle, self.parser = get_database_and_parser(
-                parse_units=True, parse_minimaps=True
-            )
-        elif "minimap_features" in self.features:
-            self.db_handle, self.parser = get_database_and_parser(
-                parse_units=False, parse_minimaps=True
-            )
-        else:
-            self.db_handle, self.parser = get_database_and_parser(
-                parse_units=False, parse_minimaps=False
-            )
+        super().__init__(sampler, features, metadata)
 
         if minimap_layers is not None:
             self.parser.setMinimapFeatures(minimap_layers)
@@ -83,9 +109,6 @@ class SC2ReplayOutcome(Dataset):
         else:
             difference_array = torch.absolute(timepoints.arange() - min_game_time)
             self.min_index = difference_array.argmin()
-
-    def __len__(self) -> int:
-        return len(self.sampler)
 
     def process_replay(self):
         """Process replay data currently in parser into dictionary of
@@ -125,26 +148,45 @@ class SC2ReplayOutcome(Dataset):
         for k in outputs_list:
             outputs[k] = torch.stack([torch.as_tensor(o) for o in outputs_list[k]])
 
-        if self.metadata:
-            outputs["metadata"] = self.parser.info.replayHash + str(
-                self.parser.info.playerId
-            )
-
         return outputs
 
-    def __getitem__(self, index: int):
-        replay_file, replay_idx = self.sampler.sample(index)
-        if not self.db_handle.load(replay_file):
-            raise FileNotFoundError(replay_file)
-        replay_data = self.db_handle.getEntry(replay_idx)
-        self.parser.parse_replay(replay_data)
-        outputs = self.process_replay()
-        return outputs
+
+class SC2MinimapSequence(SC2ReplayBase):
+
+    def __init__(
+        self,
+        sampler: ReplaySampler,
+        timediff_sec: float,
+        features: set[str] | None,
+        metadata: bool = False,
+    ):
+        super().__init__(sampler, features, metadata)
+        self.timediff_sec = timediff_sec
+
+    def process_replay(self):
+        tgt_indicies: list[int] = [0]
+        last_step = self.parser.data.gameStep[0]
+        for idx, step in enumerate(self.parser.data.gameStep[1:], 1):
+            last_sec = (step - last_step) * 22.4
+            if last_sec > self.timediff_sec:
+                prev_step = self.parser.data.gameStep[idx - 1]
+                last_last_sec = (prev_step - last_step) * 22.4
+                if last_sec < -last_last_sec:
+                    tgt_indicies.append(idx)
+                    last_step = step
+                else:
+                    tgt_indicies.append(idx - 1)
+                    last_step = prev_step
+
+        minimaps: list[Tensor] = []
+        for idx in tgt_indicies:
+            sample = self.parser.sample(idx)["minimap_features"]
+            minimaps.append(torch.as_tensor(sample))
+        return {"minimap_features": torch.stack(minimaps)}
 
 
 @dataclass
-@DATASET_REGISTRY.register_module("sc2-replay-outcome")
-class SC2ReplayConfig(DatasetConfig):
+class SC2ReplayBaseConfig(DatasetConfig):
     # Dataloader type we want to use
     train_loader: DataloaderV1Config
     val_loader: DataloaderV1Config
@@ -155,21 +197,13 @@ class SC2ReplayConfig(DatasetConfig):
         default_factory=lambda: ["player_relative", "visibility", "creep"]
     )
     train_ratio: float = 0.8  # Portion of all data to use for training
-    timepoints: TimeRange = TimeRange(0, 30, 2)  # Minutes
-    min_game_time: float = 5.0  # Minutes
     metadata: bool = False  # Return replayHash-playerId data
-
-    @classmethod
-    def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
-        return super().from_config(config, idx)
 
     def __post_init__(self):
         assert 0 < self.train_ratio < 1, f"Failed: 0<{self.train_ratio=}<1"
         # If features is not None, ensure that it is a set
         if self.features is not None and not isinstance(self.features, set):
             self.features = set(self.features)
-        if isinstance(self.timepoints, dict):
-            self.timepoints = TimeRange(**self.timepoints)
         if not isinstance(self.sampler_cfg, ModuleInitConfig):
             self.sampler_cfg = ModuleInitConfig(**self.sampler_cfg)
 
@@ -184,6 +218,9 @@ class SC2ReplayConfig(DatasetConfig):
         ret = {"image_ch": image_ch, "scalar_ch": 28}
         ret.update(self.__dict__)
         return ret
+
+    def get_cls(self):
+        raise NotImplementedError
 
     def get_dataloader(self, split: Split) -> Any:
         known_unused = {
@@ -200,7 +237,7 @@ class SC2ReplayConfig(DatasetConfig):
             **self.sampler_cfg.args,
         )
         dataset = self.init_auto_filter(
-            SC2ReplayOutcome, known_unused=known_unused, sampler=sampler
+            self.get_cls(), known_unused=known_unused, sampler=sampler
         )
         match split:
             case Split.TRAIN:
@@ -209,6 +246,30 @@ class SC2ReplayConfig(DatasetConfig):
                 return self.val_loader.get_instance(dataset)
             case _:
                 raise RuntimeError(f"How did I get here with {split=}")
+
+
+@dataclass
+@DATASET_REGISTRY.register_module("sc2-replay-outcome")
+class SC2ReplayConfig(SC2ReplayBaseConfig):
+    timepoints: TimeRange = TimeRange(0, 30, 2)  # Minutes
+    min_game_time: float = 5.0  # Minutes
+
+    def __post_init__(self):
+        super().__post_init__()
+        if isinstance(self.timepoints, dict):
+            self.timepoints = TimeRange(**self.timepoints)
+
+    def get_cls(self):
+        return SC2ReplayOutcome
+
+
+@dataclass
+@DATASET_REGISTRY.register_module("minimap-sequence")
+class MinimapSequence(SC2ReplayBaseConfig):
+    timediff_sec: float = field(kw_only=True)
+
+    def get_cls(self):
+        return SC2MinimapSequence
 
 
 class FolderDataset(Dataset):

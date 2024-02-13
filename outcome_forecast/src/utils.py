@@ -1,5 +1,6 @@
 """Utility things I guess"""
 
+import enum
 from dataclasses import dataclass
 from math import ceil
 
@@ -38,3 +39,35 @@ def get_valid_sequence_mask(valid: Tensor, sequence_len: int):
         end_idx = start_idx + sequence_len
         is_valid.append(valid[:, start_idx:end_idx].all(dim=1))
     return torch.stack(is_valid, dim=1)
+
+
+class StrEnum(str, enum.Enum):
+    """
+    Credit: https://github.com/irgeek/StrEnum/blob/master/strenum/__init__.py
+    StrEnum is a Python ``enum.Enum`` that inherits from ``str``. The default
+    ``auto()`` behavior uses the member name as its value.
+
+    Example usage::
+
+        class Example(StrEnum):
+            UPPER_CASE = auto()
+            lower_case = auto()
+            MixedCase = auto()
+
+        assert Example.UPPER_CASE == "UPPER_CASE"
+        assert Example.lower_case == "lower_case"
+        assert Example.MixedCase == "MixedCase"
+    """
+
+    def __new__(cls, value, *args, **kwargs):
+        if not isinstance(value, (str, enum.auto)):
+            raise TypeError(
+                f"Values of StrEnums must be strings: {value!r} is a {type(value)}"
+            )
+        return super().__new__(cls, value, *args, **kwargs)
+
+    def __str__(self):
+        return str(self.value)
+
+    def _generate_next_value_(name, *_):
+        return name
