@@ -47,7 +47,11 @@ def _min_to_game_step(t: float):
 
 class SC2ReplayBase(Dataset):
     def __init__(
-        self, sampler: ReplaySampler, features: set[str] | None, metadata: bool = False
+        self,
+        sampler: ReplaySampler,
+        features: set[str] | None,
+        minimap_layers: list[str] | None = None,
+        metadata: bool = False,
     ):
         super().__init__()
         self.sampler = sampler
@@ -63,6 +67,9 @@ class SC2ReplayBase(Dataset):
             self.db_handle, self.parser = get_database_and_parser(
                 parse_units=True, parse_minimaps=True
             )
+
+        if minimap_layers is not None:
+            self.parser.setMinimapFeatures(minimap_layers)
 
     def __len__(self) -> int:
         return len(self.sampler)
@@ -96,10 +103,7 @@ class SC2ReplayOutcome(SC2ReplayBase):
         minimap_layers: list[str] | None = None,
         min_game_time: float | None = None,
     ) -> None:
-        super().__init__(sampler, features, metadata)
-
-        if minimap_layers is not None:
-            self.parser.setMinimapFeatures(minimap_layers)
+        super().__init__(sampler, features, minimap_layers, metadata)
 
         _loop_per_min = 22.4 * 60
         self._target_game_loops = (timepoints.arange() * _loop_per_min).to(torch.int)
@@ -158,9 +162,10 @@ class SC2MinimapSequence(SC2ReplayBase):
         sampler: ReplaySampler,
         timediff_sec: float,
         features: set[str] | None,
+        minimap_layers: list[str] | None = None,
         metadata: bool = False,
     ):
-        super().__init__(sampler, features, metadata)
+        super().__init__(sampler, features, minimap_layers, metadata)
         self.timediff_sec = timediff_sec
 
     def process_replay(self):

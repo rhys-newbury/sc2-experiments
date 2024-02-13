@@ -5,6 +5,8 @@ Data transform utilities
 from pathlib import Path
 from typing import Callable
 
+import torch
+from ffmpegcv import VideoWriter, FFmpegWriter
 import numpy as np
 import typer
 import yaml
@@ -103,7 +105,27 @@ def make_numpy_subset(
         convert_to_numpy_files(outsubfolder, dataloader, live)
 
 
-WriterFn = Callable[[Tensor, Path], None]
+WRITER_REGISTRY = Registry("video-writer")
+
+
+@WRITER_REGISTRY.register_module()
+def self_enemy_heightmap(minimap_seq: Tensor, writer: FFmpegWriter):
+    """Write video with three channels [self, enemy, heightmap]"""
+    heightmap = 0
+    self_idx = 1
+    enemy_idx = -1
+    for minimap in minimap_seq:
+        frame_data = np.zeros([writer.height, writer.width, 3], dtype=np.uint8)
+        frame_data[..., 0] = (255 * minimap[self_idx]).to(torch.uint8).cpu().numpy()
+        frame_data[..., 1] = (255 * minimap[enemy_idx]).to(torch.uint8).cpu().numpy()
+        frame_data[..., 2] = minimap[heightmap].to(torch.uint8).cpu().numpy()
+        writer.write(frame_data)
+
+
+WriterType = StrEnum("WriterType", list(WRITER_REGISTRY.module_dict))
+
+
+WriterFn = Callable[[Tensor, FFmpegWriter], None]
 
 
 def convert_minimaps_to_videos(
@@ -113,21 +135,11 @@ def convert_minimaps_to_videos(
     with make_pbar(dataloader, outfolder.stem, live) as pbar:
         for sample_ in dataloader:
             sample = sample_[0] if isinstance(sample_, list) else sample_
-            outpath = outfolder / sample["metadata"]
-            writer(sample["minimap_features"], outpath)
+            outpath: Path = outfolder / (sample["metadata"][0] + ".mp4")
+            sz = sample["minimap_features"].shape[-2:]
+            with VideoWriter(outpath, "h264", 6, sz) as w:
+                writer(sample["minimap_features"][0], w)
             pbar.update(1)
-
-
-WRITER_REGISTRY = Registry("video-writer")
-
-
-@WRITER_REGISTRY.register_module()
-def self_enemy_heightmap(minimap_seq: Tensor, writepath: Path):
-    """Write video with three channels [self, enemy, heightmap]"""
-    pass
-
-
-WriterType = StrEnum("WriterType", list(WRITER_REGISTRY.module_dict))
 
 
 @app.command()
