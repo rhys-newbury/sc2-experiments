@@ -20,7 +20,7 @@ ENV LD_PRELOAD=/opt/zlib-ng/libz.so.1.3.0.zlib-ng
 
 RUN pip install scikit-learn xgboost matplotlib sc2reader wandb
 
-RUN pip install git+https://github.com/5had3z/sc2-serializer git+https://github.com/5had3z/konductor
+RUN pip install git+https://github.com/5had3z/sc2-serializer
 
 WORKDIR /app
 
@@ -30,5 +30,7 @@ RUN mkdir database_tools && cd database_tools && \
 ARG COMMIT
 RUN [ ! -z "${COMMIT}" ]
 ENV COMMIT_SHA=${COMMIT}
+
+RUN pip install git+https://github.com/5had3z/konductor
 
 COPY . .
