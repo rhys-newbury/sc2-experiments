@@ -344,8 +344,6 @@ class FolderDatasetConfig(DatasetConfig):
 
 
 class DaliFolderDataset(BaseDALIDataset):
-    should_batch = False
-
     def __init__(
         self,
         path: Path,
@@ -451,7 +449,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         shard_id: int,
         num_shards: int,
         random_shuffle: bool,
-        should_batch: bool = False,
+        yields_batch: bool = False,
         metadata: bool = False,
         minimap_layers: list[str] | None = None,
     ) -> None:
@@ -468,7 +466,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         self.db_handle: ReplayDatabase | None = None
         self.parser: ReplayParser | None = None
         self.minimap_layers = minimap_layers
-        self.should_batch = should_batch
+        self.yields_batch = yields_batch
 
     def _initialize(self):
         self.sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](**self.sampler_cfg.args)
@@ -540,7 +538,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
             raise FileNotFoundError(replay_file)
         replay_data = self.db_handle.getEntry(replay_idx)
         self.parser.parse_replay(replay_data)
-        if self.should_batch:
+        if self.yields_batch:
             samples = [self.process_replay() for _ in range(self.batch_size)]
             outputs = []
             for idx in range(len(samples[0])):
@@ -569,7 +567,7 @@ class DaliReplayClipConfig(DatasetConfig):
     train_ratio: float = 0.8  # Portion of all data to use for training
     fp16_out: bool = False
     metadata: bool = False
-    should_batch: bool = False
+    yields_batch: bool = False
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
@@ -666,8 +664,8 @@ def sc2_data_pipeline(
         source=source,
         num_outputs=len(keys),
         parallel=True,
-        batch=source.should_batch,
-        batch_info=source.should_batch,
+        batch=source.yields_batch,
+        batch_info=source.yields_batch,
         dtype=[_DTYPES[k].dtype for k in keys],
         ndim=[_DTYPES[k].ndim for k in keys],
     )

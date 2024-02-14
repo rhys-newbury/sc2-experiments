@@ -1,11 +1,12 @@
 import sqlite3
+from abc import ABC, abstractmethod
 from logging import getLogger
 from pathlib import Path
 from typing import Sequence
 
 import numpy as np
 import torch
-from nvidia.dali.types import SampleInfo, BatchInfo
+from nvidia.dali.types import BatchInfo, SampleInfo
 from torch import Tensor
 
 
@@ -55,10 +56,8 @@ def gen_val_query(database: Path, sql_filters: list[str] | None):
     return sql_query
 
 
-class BaseDALIDataset:
+class BaseDALIDataset(ABC):
     """External Iterator for DALI"""
-
-    should_batch = False
 
     def __init__(
         self,
@@ -66,6 +65,7 @@ class BaseDALIDataset:
         shard_id: int,
         num_shards: int,
         random_shuffle: bool,
+        yields_batch: bool = False,
     ) -> None:
         self.logger = getLogger(type(self).__name__)
         self.shard_id = shard_id
@@ -74,12 +74,14 @@ class BaseDALIDataset:
         self.random_shuffle = random_shuffle
         self.idx_samples: np.ndarray = np.zeros(0, dtype=np.int64)
         self.last_seen_epoch = -1
+        self.yields_batch = yields_batch
 
     def _initialize(self):
         self.idx_samples = np.arange(len(self), dtype=np.int64)
 
-    def __len__(self):
-        raise NotImplementedError
+    @abstractmethod
+    def __len__(self) -> int:
+        """Number of samples in dataset"""
 
     def __getstate__(self):
         return self.__dict__.copy()
@@ -90,7 +92,10 @@ class BaseDALIDataset:
 
     @property
     def num_iterations(self):
-        return len(self) // self.num_shards // self.batch_size
+        _num_iter = len(self) // self.num_shards
+        if not self.yields_batch:
+            _num_iter //= self.batch_size
+        return _num_iter
 
     def resample_indicies(self, epoch_idx: int):
         self.last_seen_epoch = epoch_idx
