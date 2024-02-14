@@ -81,7 +81,8 @@ app = typer.Typer()
 @app.command()
 def main(
     workspace: Annotated[Path, typer.Option()],
-    epoch: Annotated[int, typer.Option()],
+    epoch: Annotated[Optional[int], typer.Option()] = None,
+    iteration: Annotated[Optional[int], typer.Option()] = None,
     remote: Annotated[Optional[Path], typer.Option()] = None,
     run_hash: Annotated[Optional[str], typer.Option()] = None,
     config_file: Annotated[Optional[Path], typer.Option()] = None,
@@ -143,7 +144,7 @@ def main(
         )
     trainer.min_index = data_cfg.properties.get("min_index", None)  # Set min index?
 
-    trainer.train(epoch=epoch)
+    trainer.train(epoch=epoch, iteration=iteration)
 
 
 if __name__ == "__main__":
