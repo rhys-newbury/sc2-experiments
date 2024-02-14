@@ -6,7 +6,7 @@ dataset:
       step_sec: 10
       clip_len: 8
       features: ["minimap_features"]
-      should_batch: true
+      yields_batch: true
       sampler_cfg:
         type: sql
         args:
@@ -19,18 +19,26 @@ dataset:
     val_loader:
       type: DALI
       args:
-        batch_size: 64
+        batch_size: 128
         drop_last: true
     train_loader:
       type: DALI
       args:
         shuffle: true
-        batch_size: 64
+        batch_size: 128
         drop_last: true
         augmentations:
+          - type: permute-dims # FCHW -> FHWC
+            args:
+              dst: [0, 2, 3, 1]
+          - type: random-flip
+            args: {}
           - type: random-rotate
             args:
               angle_deg: 180
+          - type: permute-dims # FHWC -> FCHW
+            args:
+              dst: [0, 3, 1, 2]
 criterion:
   - type: minimap-focal
     args: {}
@@ -64,9 +72,14 @@ model:
       scheduler:
         type: poly
         args:
-          max_iter: 5
+          max_iter: 100
           power: 0.9
 logger:
-  interval: 10
+  interval: 1000
 trainer:
   amp: {}
+  validation_interval: 10000
+checkpointer:
+  mode: iteration
+  latest: 10000
+  extra: 50000

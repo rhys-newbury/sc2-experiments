@@ -668,6 +668,7 @@ def sc2_data_pipeline(
         batch_info=source.yields_batch,
         dtype=[_DTYPES[k].dtype for k in keys],
         ndim=[_DTYPES[k].ndim for k in keys],
+        layout=[_DTYPES[k].layout for k in keys],
     )
 
     if len(augmentations) != 0:

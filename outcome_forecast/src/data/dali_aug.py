@@ -1,5 +1,7 @@
 """Augmentations primarily for minimap data"""
 
+from typing import Sequence
+
 from konductor.data.dali import DALI_AUGMENTATIONS
 from nvidia.dali import fn
 from nvidia.dali.types import DALIDataType, DALIInterpType
@@ -29,3 +31,9 @@ def random_rotate(minimaps: DataNode, angle_deg: float):
         keep_size=True,
     )
     return minimaps
+
+
+@DALI_AUGMENTATIONS.register_module("permute-dims")
+def permute_dims(minimaps: DataNode, dst: Sequence[int]):
+    """Permute/transpose dimensions with a list of indicies, i.e. [1,2,0] to go from CHW to HWC"""
+    return fn.transpose(minimaps, perm=dst)
