@@ -104,22 +104,20 @@ class ConvForecaster(nn.Module):
 
     def forward_sequence(self, inputs: Tensor) -> Tensor:
         minimap_low: list[Tensor] = []
-        minimap_high: list[Tensor] = []
-
         for t in range(inputs.shape[1]):
-            enc = self.encoder(inputs[:, t])
+            enc: list[Tensor] = self.encoder(inputs[:, t])
             minimap_low.append(enc[0])
-            minimap_high.append(enc[-1])
+        last_minimap_high = enc[-1]
 
         stacked_feats = torch.stack(minimap_low, dim=2)
-        temporal_feats = self.temporal_conv(stacked_feats)
+        temporal_feats: Tensor = self.temporal_conv(stacked_feats)
         temporal_feats = F.interpolate(
             temporal_feats.squeeze(2),
-            size=minimap_high[-1].shape[-2:],
+            size=last_minimap_high.shape[-2:],
             mode="bilinear",
             align_corners=True,
         )
-        cat_features = torch.cat([temporal_feats, minimap_high[-1]], dim=1)
+        cat_features = torch.cat([temporal_feats, last_minimap_high], dim=1)
         decoded = self.decoder(cat_features)
         return decoded
 
