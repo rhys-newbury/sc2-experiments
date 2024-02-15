@@ -674,7 +674,7 @@ def sc2_data_pipeline(
         dtype=[_DTYPES[k].dtype for k in keys],
         ndim=[_DTYPES[k].ndim for k in keys],
         layout=[_DTYPES[k].layout for k in keys],
-        prefetch_queue_depth=3,
+        prefetch_queue_depth=4,
     )
 
     def transform(data: DataNode, key: str):
