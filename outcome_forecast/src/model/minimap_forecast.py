@@ -1,5 +1,8 @@
+import functools
+import operator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Sequence
+
 
 import torch
 from torch import nn, Tensor
@@ -210,7 +213,7 @@ class PosQueryDecoder(nn.Module):
 
         self.out_shape = out_shape
         self.queries: nn.Parameter | Tensor = {
-            "fixed-queries": make_fixed_queries,
+            "fixed-queries": make_sinusoid_encodings,
             "learned-queries": make_learned_queries,
             "learned-queries-freq": make_learned_freq_queries,
         }[query_cfg.type](out_shape=out_shape, **query_cfg.args)
@@ -232,16 +235,11 @@ class PosQueryDecoder(nn.Module):
         return decoded
 
 
-def make_learned_queries(out_shape: tuple[int, int], query_dim: int):
-    """Make parameters for learned queries"""
-    queries = nn.Parameter(torch.empty(out_shape[0] * out_shape[1], query_dim))
-    with torch.no_grad():
-        queries.normal_(0, 0.5).clamp_(-2, 2)
-    return queries
-
-
-def make_fixed_queries(
-    out_shape: tuple[int, int], f_num: int, f_max: float | None = None
+def make_sinusoid_encodings(
+    out_shape: Sequence[int],
+    f_num: int,
+    f_max: float | None = None,
+    dev: torch.device | None = None,
 ):
     """Make fixed queries with sine/cosine encodings"""
     if f_max is None:
@@ -249,22 +247,32 @@ def make_fixed_queries(
 
     coords = torch.stack(
         torch.meshgrid(
-            [torch.linspace(-1, 1, steps=s) for s in out_shape], indexing="ij"
+            [torch.linspace(-1, 1, steps=s, device=dev) for s in out_shape],
+            indexing="ij",
         ),
         dim=-1,
     )
-    frequencies = torch.linspace(1.0, f_max / 2.0, f_num)[None, None, None]
+    frequencies = torch.linspace(1.0, f_max / 2.0, f_num, device=dev)[None, None, None]
     frequency_grids = torch.pi * coords[..., None] * frequencies
     encodings = torch.cat([frequency_grids.sin(), frequency_grids.cos()], dim=-1)
 
     return encodings.reshape(*out_shape, -1)
 
 
+def make_learned_queries(out_shape: Sequence[int], query_dim: int):
+    """Make parameters for learned queries"""
+    n_queries = functools.reduce(operator.mul, out_shape)
+    queries = nn.Parameter(torch.empty(n_queries, query_dim))
+    with torch.no_grad():
+        queries.normal_(0, 0.5).clamp_(-2, 2)
+    return queries
+
+
 def make_learned_freq_queries(
-    out_shape: tuple[int, int], f_num: int, f_max: float | None = None
+    out_shape: Sequence[int], f_num: int, f_max: float | None = None
 ):
     """Initialize parameter with sine/cosine encodings"""
-    queries = make_fixed_queries(out_shape, f_num, f_max)
+    queries = make_sinusoid_encodings(out_shape, f_num, f_max)
     return nn.Parameter(queries)
 
 
@@ -281,12 +289,14 @@ class TransformerForecasterV1(nn.Module):
         num_latents: int,
         latent_dim: int,
         history_len: int,
+        latent_minimap_shape: tuple[int, int] | None,
     ) -> None:
         super().__init__()
         self.encoder = encoder
         self.temporal = temporal
         self.decoder = decoder
         self.history_len = history_len
+        self.latent_minimap_shape = latent_minimap_shape
         self.latent = nn.Parameter(torch.empty(num_latents, latent_dim))
         self._init_parameters()
 
@@ -296,13 +306,31 @@ class TransformerForecasterV1(nn.Module):
 
     def flatten_input_encodings(self, inputs: Tensor):
         """Transform inputs [B,T,C,H,W] to [B,THW,C] and add position embeddings"""
-        return inputs
+        inputs = torch.permute(inputs, [0, 1, 3, 4, 2])
+        f_num = 8 if self.latent_minimap_shape is None else self.latent_minimap_shape[0]
+        pos_enc = make_sinusoid_encodings(inputs.shape[1:4], f_num, dev=inputs.device)
+        pos_enc = pos_enc[None].expand(inputs.shape[0], *pos_enc.shape)
+        inputs_pos = torch.cat([inputs, pos_enc], dim=-1)
+        inputs_pos = inputs_pos.reshape(inputs.shape[0], -1, inputs_pos.shape[-1])
+        return inputs_pos
+
+    def encode_inputs(self, inputs: Tensor):
+        inputs_enc: list[Tensor] = []
+        for t in range(inputs.shape[1]):
+            enc = self.encoder(inputs[:, t])
+            if self.latent_minimap_shape is not None:
+                enc = F.interpolate(
+                    enc,
+                    size=self.latent_minimap_shape,
+                    mode="bilinear",
+                    align_corners=True,
+                )
+            inputs_enc.append(enc)
+        return torch.stack(inputs_enc, dim=1)
 
     def forward_sequence(self, inputs: Tensor):
         """Run a single sequence [B,T,C,H,W]"""
-        inputs_enc = torch.stack(
-            [self.encoder(inputs[:, t]) for t in range(inputs.shape[1])], dim=1
-        )
+        inputs_enc = self.encode_inputs(inputs)
         inputs_enc = self.flatten_input_encodings(inputs_enc)
         temporal_feats = self.temporal(self.latent, inputs_enc)
         output = self.decoder(temporal_feats)
@@ -326,6 +354,7 @@ class TransformerForecasterV1(nn.Module):
 @MODEL_REGISTRY.register_module("transformer-forecast-v1")
 class TransformerForecasterConfig(BaseConfig):
     decoder_query: ModuleInitConfig = field(kw_only=True)
+    latent_minimap_shape: tuple[int, int] | None = None
     num_latents: int = field(kw_only=True)
     latent_dim: int = field(kw_only=True)
 
