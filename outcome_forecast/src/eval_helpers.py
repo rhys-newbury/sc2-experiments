@@ -35,12 +35,9 @@ def get_dataloader_with_metadata(
     exp_config: ExperimentInitConfig, split: Split = Split.VAL
 ):
     """Get dataloader that also returns metadata (unique id associated with sample)"""
-    # Need to add metadata list of keys to yield
-    yield_keys: list[str] = exp_config.data[0].dataset.args["keys"]
-    if "metadata" not in yield_keys:
-        yield_keys.append("metadata")
-    dataloader = get_dataset_config(exp_config).get_dataloader(split)
-    return dataloader
+    dataset_cfg = get_dataset_config(exp_config)
+    dataset_cfg.metadata = True  # Need to add metadata list of keys to yield
+    return dataset_cfg.get_dataloader(split)
 
 
 def setup_eval_model_and_dataloader(
@@ -62,8 +59,7 @@ def setup_eval_model_and_dataloader(
         exp_config.set_workers(workers)
 
     model = load_model_checkpoint(exp_config)
-    dataset = get_dataset_config(exp_config)
-    dataloader = dataset.get_dataloader(split)
+    dataloader = get_dataloader_with_metadata(exp_config, split)
 
     return exp_config, model, dataloader
 
@@ -94,25 +90,23 @@ def create_score_frame(pred: Tensor, target: Tensor) -> Tensor:
     return bgr_frame
 
 
-def write_minimaps(
-    pred: Tensor, target: Tensor, timepoint: float, folder: Path, prefix: str
-):
+def write_minimaps(pred: Tensor, target: Tensor, folder: Path, prefix: str):
     """Write visualization results to disk"""
     predFolder = folder / "pred"
     dataFolder = folder / "data"
 
     for idx, name in enumerate(["self", "enemy"]):
         cv2.imwrite(
-            str(predFolder / f"{prefix}_{timepoint}_{name}.png"),
+            str(predFolder / f"{prefix}_{name}.png"),
             (255 * (1 - pred[idx])).to(torch.uint8).cpu().numpy(),
         )
         cv2.imwrite(
-            str(dataFolder / f"{prefix}_{timepoint}_{name}.png"),
+            str(dataFolder / f"{prefix}_{name}.png"),
             (255 * (1 - target[idx])).to(torch.uint8).cpu().numpy(),
         )
 
         cv2.imwrite(
-            str(predFolder / f"{prefix}_{timepoint}_diff_{name}.png"),
+            str(predFolder / f"{prefix}_diff_{name}.png"),
             create_score_frame(pred[idx], target[idx]).cpu().numpy(),
         )
 
@@ -128,12 +122,7 @@ def get_upper_left_coord(idx: int, grid_size: int, tile_size: int):
 
 
 def write_tiled_sequence(
-    data: Tensor,
-    timepoint: float,
-    end_idx: int,
-    seq_len: int,
-    folder: Path,
-    prefix: str,
+    data: Tensor, end_idx: int, seq_len: int, folder: Path, prefix: str
 ):
     """Write the historicalsequence and target frame"""
     dataFolder = folder / "data"
@@ -156,7 +145,7 @@ def write_tiled_sequence(
                 0, 0
             ]
         cv2.imwrite(
-            str(dataFolder / f"{prefix}_{timepoint}_{name}_seq.png"),
+            str(dataFolder / f"{prefix}_{name}_seq.png"),
             base_image.cpu().numpy(),
         )
 
@@ -165,7 +154,7 @@ def write_minimap_forecast_results(
     preds: Tensor,
     data: dict[str, Tensor],
     outdir: Path,
-    timepoints: Tensor,
+    timepoints: list[float] | None,
     n_time: int,
 ):
     """
@@ -180,38 +169,32 @@ def write_minimap_forecast_results(
     dataFolder.mkdir(exist_ok=True)
 
     metadata = metadata_to_str(data["metadata"])
+    pred_sig = preds.sigmoid()
 
     targets = data["minimap_features"][:, :, [-4, -1]]
     sequence_len = targets.shape[1] - preds.shape[1]
-    valid_seq = get_valid_sequence_mask(data["valid"], sequence_len + 1)
-    pred_sig = preds.sigmoid()
-    timepoints = timepoints.to(preds.device)
-
+    if "valid" in data:
+        valid_seq = get_valid_sequence_mask(data["valid"], sequence_len + 1)
+    else:
+        valid_seq = torch.ones(targets.shape[0], 1, dtype=torch.bool)
     indicies = torch.arange(valid_seq.shape[1], device=valid_seq.device) + sequence_len
 
     for bidx in range(preds.shape[0]):
         prefix = metadata[bidx]
         # Only get a few random samples
-        rand_idxs = [i.item() for i in indicies[valid_seq[bidx]].cpu()]
+        rand_idxs: list[int] = [i.item() for i in indicies[valid_seq[bidx]].cpu()]
         random.shuffle(rand_idxs)
         rand_idxs = rand_idxs[:n_time]
 
         for idx in rand_idxs:
+            prefix_ = prefix
+            if timepoints is not None:
+                prefix_ += f"_{timepoints[idx]}"
+
             write_minimaps(
-                pred_sig[bidx, idx - sequence_len],
-                targets[bidx, idx],
-                timepoints[idx].item(),
-                outdir,
-                prefix,
+                pred_sig[bidx, idx - sequence_len], targets[bidx, idx], outdir, prefix
             )
-            write_tiled_sequence(
-                targets[bidx],
-                timepoints[idx].item(),
-                idx,
-                sequence_len + 1,  # Include last item
-                outdir,
-                prefix,
-            )
+            write_tiled_sequence(targets[bidx], idx, sequence_len + 1, outdir, prefix)
 
     with open(outdir / "samples.txt", "a") as f:
         f.writelines(m + "\n" for m in metadata)

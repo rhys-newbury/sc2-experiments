@@ -612,17 +612,19 @@ class DaliReplayClipConfig(DatasetConfig):
 
     def get_dataloader(self, split: Split) -> Any:
         loader = self.train_loader if split is Split.TRAIN else self.val_loader
+        features = deepcopy(self.features)
+        if self.metadata and "metadata" not in features:
+            features.append("metadata")
+
         pipeline = sc2_data_pipeline(
             source=self._make_source(split),
-            keys=self.features,
+            keys=features,
             fp16_out=self.fp16_out,
             **loader.pipe_kwargs(),
         )
         size = self._get_size(split)
-        out_map = deepcopy(self.features)
-        if self.metadata:
-            out_map.append("metadata")
-        return loader.get_instance(pipeline, out_map=out_map, size=size)
+
+        return loader.get_instance(pipeline, out_map=features, size=size)
 
 
 @dataclass
