@@ -171,9 +171,11 @@ class CrossAttentionBlockV1(nn.Module):
 
     def forward(self, query: Tensor, keyvalue: Tensor):
         inter: Tensor
-        inter = query + self.c_attn(self.q_norm(query), self.kv_norm(keyvalue))
+        keyvalue_norm = self.kv_norm(keyvalue)
+        inter = query + self.c_attn(self.q_norm(query), keyvalue_norm, keyvalue_norm)[0]
         inter = inter + self.middle_mlp(inter)
-        inter = inter + self.s_attn(self.middle_norm(inter))
+        middle_norm = self.middle_norm(inter)
+        inter = inter + self.s_attn(middle_norm, middle_norm, middle_norm)[0]
         inter = inter + self.out_mlp(inter)
         return inter
 
@@ -212,11 +214,15 @@ class PosQueryDecoder(nn.Module):
         super().__init__()
 
         self.out_shape = out_shape
-        self.queries: nn.Parameter | Tensor = {
-            "fixed-queries": make_sinusoid_encodings,
+        queries: nn.Parameter | Tensor = {
+            "fixed-queries": make_fixed_queries,
             "learned-queries": make_learned_queries,
             "learned-queries-freq": make_learned_freq_queries,
         }[query_cfg.type](out_shape=out_shape, **query_cfg.args)
+        if not isinstance(queries, nn.Parameter):
+            self.register_buffer("queries", queries, persistent=False)
+        else:
+            self.queries = queries
 
         self.input_norm = nn.LayerNorm(input_dim)
         self.decoder = nn.MultiheadAttention(
@@ -224,12 +230,14 @@ class PosQueryDecoder(nn.Module):
             kdim=input_dim,
             vdim=input_dim,
             num_heads=num_heads,
+            batch_first=True,
         )
         self.linear = nn.Linear(self.queries.shape[-1], output_dim)
 
     def forward(self, latent: Tensor):
-        queries = self.queries.repeat(latent.shape[0], 1, 1)
-        decoded: Tensor = self.decoder(queries, self.input_norm(latent))
+        queries = self.queries[None].expand(latent.shape[0], *self.queries.shape)
+        in_norm = self.input_norm(latent)
+        decoded: Tensor = self.decoder(queries, in_norm, in_norm)[0]
         decoded = self.linear(decoded)
         decoded = decoded.reshape(latent.shape[0], -1, *self.out_shape)
         return decoded
@@ -259,6 +267,14 @@ def make_sinusoid_encodings(
     return encodings.reshape(*out_shape, -1)
 
 
+def make_fixed_queries(
+    out_shape: Sequence[int], f_num: int, f_max: float | None = None
+):
+    queries = make_sinusoid_encodings(out_shape, f_num, f_max)
+    queries = queries.reshape(-1, queries.shape[-1])
+    return queries
+
+
 def make_learned_queries(out_shape: Sequence[int], query_dim: int):
     """Make parameters for learned queries"""
     n_queries = functools.reduce(operator.mul, out_shape)
@@ -272,7 +288,7 @@ def make_learned_freq_queries(
     out_shape: Sequence[int], f_num: int, f_max: float | None = None
 ):
     """Initialize parameter with sine/cosine encodings"""
-    queries = make_sinusoid_encodings(out_shape, f_num, f_max)
+    queries = make_fixed_queries(out_shape, f_num, f_max)
     return nn.Parameter(queries)
 
 
@@ -332,7 +348,8 @@ class TransformerForecasterV1(nn.Module):
         """Run a single sequence [B,T,C,H,W]"""
         inputs_enc = self.encode_inputs(inputs)
         inputs_enc = self.flatten_input_encodings(inputs_enc)
-        temporal_feats = self.temporal(self.latent, inputs_enc)
+        latent = self.latent[None].expand(inputs_enc.shape[0], *self.latent.shape)
+        temporal_feats = self.temporal(latent, inputs_enc)
         output = self.decoder(temporal_feats)
         return output
 
@@ -368,7 +385,12 @@ class TransformerForecasterConfig(BaseConfig):
         if hasattr(encoder, "disable_fpn"):
             assert encoder.disable_fpn
         self.temporal.args["latent_dim"] = self.latent_dim
-        self.temporal.args["kv_dim"] = encoder.out_ch
+
+        pos_dim = (
+            8 if self.latent_minimap_shape is None else self.latent_minimap_shape[0]
+        )
+        pos_dim *= 6  # (T,H,W)*(sin,cos)
+        self.temporal.args["kv_dim"] = encoder.out_ch + pos_dim
         temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
 
         self.decoder.args["input_dim"] = self.latent_dim
