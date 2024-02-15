@@ -511,8 +511,11 @@ class DaliReplayClipDataset(BaseDALIDataset):
                 range(start_idx, end_idx, self.step_size),
             )
             attempts += 1
-            if attempts > 50:
-                raise RuntimeError("Maximum iteration attempt exceeded")
+            if attempts > 100:
+                raise RuntimeError(
+                    "Maximum iteration attempt exceeded for replay: "
+                    f"{self.parser.info.replayHash}, {self.parser.info.playerId}"
+                )
 
         for idx in sample_indicies:
             sample = self.parser.sample(int(idx.item()))
