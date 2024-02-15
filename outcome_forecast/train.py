@@ -145,6 +145,9 @@ def main(
     trainer.min_index = data_cfg.properties.get("min_index", None)  # Set min index?
 
     trainer.train(epoch=epoch, iteration=iteration)
+    # from konductor.trainer.profiler import profile_function
+
+    # profile_function(trainer._train, Path.cwd())
 
 
 if __name__ == "__main__":

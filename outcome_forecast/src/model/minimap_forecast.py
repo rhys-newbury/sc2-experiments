@@ -331,18 +331,13 @@ class TransformerForecasterV1(nn.Module):
         return inputs_pos
 
     def encode_inputs(self, inputs: Tensor):
-        inputs_enc: list[Tensor] = []
-        for t in range(inputs.shape[1]):
-            enc = self.encoder(inputs[:, t])
-            if self.latent_minimap_shape is not None:
-                enc = F.interpolate(
-                    enc,
-                    size=self.latent_minimap_shape,
-                    mode="bilinear",
-                    align_corners=True,
-                )
-            inputs_enc.append(enc)
-        return torch.stack(inputs_enc, dim=1)
+        b_sz, t_sz = inputs.shape[:2]
+        inputs = inputs.reshape(-1, *inputs.shape[2:])
+        inputs_enc = self.encoder(inputs)
+        if self.latent_minimap_shape is not None:
+            inputs_enc = F.adaptive_avg_pool2d(inputs_enc, self.latent_minimap_shape)
+        inputs_enc = inputs_enc.reshape(b_sz, t_sz, -1, *inputs_enc.shape[-2:])
+        return inputs_enc
 
     def forward_sequence(self, inputs: Tensor):
         """Run a single sequence [B,T,C,H,W]"""

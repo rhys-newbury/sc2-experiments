@@ -2,15 +2,14 @@
 
 import dash
 from konductor.webserver.app import cliapp
-from utils import plotly_comparison
-from utils import plotly_gamelength
+from utils import plotly_comparison, plotly_gamelength
 
 dash.register_page(
-    "Results over time", path="/timeseries-performance", layout=plotly_comparison.layout
+    "Results Over Time", path="/timeseries-performance", layout=plotly_comparison.layout
 )
 
 dash.register_page(
-    "Results over GameLength",
+    "Results Over GameLength",
     path="/gamelength-performance",
     layout=plotly_gamelength.layout,
 )
