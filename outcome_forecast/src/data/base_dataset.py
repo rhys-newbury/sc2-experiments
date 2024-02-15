@@ -649,7 +649,12 @@ def apply_minimap_augs(minimaps: DataNode, augs: list[ModuleInitConfig]):
     return minimaps
 
 
-@pipeline_def(py_start_method="spawn", prefetch_queue_depth=2, enable_conditionals=True)
+@pipeline_def(
+    py_start_method="spawn",
+    prefetch_queue_depth=2,
+    enable_conditionals=True,
+    py_num_workers=4,
+)
 def sc2_data_pipeline(
     shard_id: int,
     num_shards: int,
@@ -669,6 +674,7 @@ def sc2_data_pipeline(
         dtype=[_DTYPES[k].dtype for k in keys],
         ndim=[_DTYPES[k].ndim for k in keys],
         layout=[_DTYPES[k].layout for k in keys],
+        prefetch_queue_depth=3,
     )
 
     def transform(data: DataNode, key: str):
@@ -686,7 +692,9 @@ def sc2_data_pipeline(
 
     if len(augmentations) != 0:
         minimap_idx = keys.index("minimap_features")
-        outputs[minimap_idx] = apply_minimap_augs(outputs[minimap_idx].gpu(), augmentations)
+        outputs[minimap_idx] = apply_minimap_augs(
+            outputs[minimap_idx].gpu(), augmentations
+        )
 
     outputs = [transform(o, k) for o, k in zip(outputs, keys)]
 
