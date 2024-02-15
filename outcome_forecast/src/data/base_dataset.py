@@ -671,10 +671,6 @@ def sc2_data_pipeline(
         layout=[_DTYPES[k].layout for k in keys],
     )
 
-    if len(augmentations) != 0:
-        minimap_idx = keys.index("minimap_features")
-        outputs[minimap_idx] = apply_minimap_augs(outputs[minimap_idx], augmentations)
-
     def transform(data: DataNode, key: str):
         """Move data to gpu and cast to fp16 if enabled"""
         data = data.gpu()
@@ -688,4 +684,10 @@ def sc2_data_pipeline(
             return fn.pad(data, fill_value=0)
         return data
 
-    return tuple(transform(o, k) for o, k in zip(outputs, keys))
+    if len(augmentations) != 0:
+        minimap_idx = keys.index("minimap_features")
+        outputs[minimap_idx] = apply_minimap_augs(outputs[minimap_idx].gpu(), augmentations)
+
+    outputs = [transform(o, k) for o, k in zip(outputs, keys)]
+
+    return tuple(outputs)
