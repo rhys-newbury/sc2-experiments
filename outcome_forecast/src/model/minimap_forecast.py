@@ -237,6 +237,7 @@ class PosQueryDecoder(nn.Module):
         in_norm = self.input_norm(latent)
         decoded: Tensor = self.decoder(queries, in_norm, in_norm)[0]
         decoded = self.linear(decoded)
+        decoded = decoded.permute(0, 2, 1)  # spatial last
         decoded = decoded.reshape(latent.shape[0], -1, *self.out_shape)
         return decoded
 
