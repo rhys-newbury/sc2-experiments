@@ -47,6 +47,7 @@ model:
     args:
       num_latents: 32
       latent_dim: 128
+      latent_minimap_shape: [6, 6]
       encoder:
         type: image-fpn
         args:
