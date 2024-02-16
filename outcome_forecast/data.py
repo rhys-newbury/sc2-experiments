@@ -299,9 +299,9 @@ def merge_valid_stride_files(
     # Sort by start index of shard
     shards = sorted(shards, key=lambda p: int(p.stem.split("_")[4]))
 
-    metadata = pq.read_metadata(shards[0])
+    schema = pq.read_schema(shards[0])
 
-    with pq.ParquetWriter(path / f"{filestem}.parquet", metadata.schema) as writer:
+    with pq.ParquetWriter(path / f"{filestem}.parquet", schema) as writer:
         with LivePbar(total=len(shards), desc="Merging files") as pbar:
             for shard in shards:
                 data = pq.read_table(shard)
