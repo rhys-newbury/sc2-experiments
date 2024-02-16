@@ -539,19 +539,21 @@ class DaliReplayClipDataset(BaseDALIDataset):
         if shuffle:
             np.random.shuffle(self.valid_indicies)
 
-    def get_sequence_with_mask_file(self, offset: int):
+    def get_sequence_with_mask_file(self, offset: int, retry_depth: int):
         """
         Get the valid sequence with an offset from the randomly shuffled set
         """
         assert self.valid_indicies is not None
         sample_indicies = self.get_sample_indicies_from_start(
-            self.valid_indicies[offset % len(self.valid_indicies)]
+            self.parser.data.gameStep[self.valid_indicies[offset % len(self.valid_indicies)].item()]
         )
-        if (sample_indicies == -1).any():
-            raise RuntimeError(
-                f"Got invalid sample {self.valid_indicies[offset]} from mask at "
-                f"{self.parser.info.replayHash}, {self.parser.info.playerId}"
-            )
+        if (sample_indicies == -1).any(): 
+            if retry_depth > 128:  # You gotta be kidding me
+                raise RuntimeError(
+                    f"Got invalid sample {self.valid_indicies[offset]} from mask at "
+                    f"{self.parser.info.replayHash}, {self.parser.info.playerId}"
+                )
+            return self.get_sequence_with_mask_file(offset + 1, retry_depth + 1)
         return sample_indicies
 
     def get_sample_indicies_from_start(self, start_idx: int):
@@ -568,7 +570,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         return (
             self.get_sequence_no_mask_file()
             if self.valid_clip_file is None
-            else self.get_sequence_with_mask_file(offset)
+            else self.get_sequence_with_mask_file(offset, 0)
         )
 
     def process_replay(self, sample_indicies: Tensor):
