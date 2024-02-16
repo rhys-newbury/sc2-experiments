@@ -1,12 +1,13 @@
 dataset:
   - type: dali-replay-clip
     args:
-      start_min: 2
-      end_min: 20
-      step_sec: 10
+      start_min: 0
+      end_min: 120
+      step_sec: 3
       clip_len: 8
       features: ["minimap_features"]
       yields_batch: true
+      valid_clip_file: /media/bryce/nfs/minimap-experiments
       sampler_cfg:
         type: sql
         args:
@@ -15,7 +16,8 @@ dataset:
             - game_length > 6720
             - read_success = 1
             - parse_success = 1
-            - number_game_step > 512
+            - number_game_step > 1024
+            - playerAPM > 100
     val_loader:
       type: DALI
       args:
