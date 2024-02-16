@@ -3,12 +3,13 @@ import random
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from zipfile import BadZipFile
 
 import numpy as np
 import torch
 import yaml
+import pandas as pd
 from konductor.data import (
     DATASET_REGISTRY,
     DatasetConfig,
@@ -452,6 +453,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         yields_batch: bool = False,
         metadata: bool = False,
         minimap_layers: list[str] | None = None,
+        valid_clip_file: Path | None = None,
     ) -> None:
         super().__init__(batch_size, shard_id, num_shards, random_shuffle)
         self.sampler_cfg = sampler_cfg
@@ -462,11 +464,13 @@ class DaliReplayClipDataset(BaseDALIDataset):
         self.clip_len = clip_len + 1  # Need to yield frame after history
         self.metadata = metadata
         self.features = features
+        self.valid_clip_file = valid_clip_file
 
         self.db_handle: ReplayDatabase | None = None
         self.parser: ReplayParser | None = None
         self.minimap_layers = minimap_layers
         self.yields_batch = yields_batch
+        self.valid_indicies: None | np.ndarray = None
 
     def _initialize(self):
         self.sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](**self.sampler_cfg.args)
@@ -489,26 +493,17 @@ class DaliReplayClipDataset(BaseDALIDataset):
         end = min(self.end_step, game_steps[-1] - self.clip_len)
         return random.randint(start, end)
 
-    def process_replay(self):
+    def get_sequence_no_mask_file(self):
+        """
+        Randomly sample a start time from the replay to make the sequence,
+        will throw after 100 attempts if a valid sequence can't be found
+        """
         assert self.parser is not None
-        try:
-            test_sample: dict[str, Any] = self.parser.sample(0)
-        except (RuntimeError, IndexError) as err:
-            raise RuntimeError(f"Parse failure for {self.parser.info}") from err
-
-        outputs_list = {
-            k: []
-            for k in (test_sample.keys() if self.features is None else self.features)
-        }
-
         sample_indicies = torch.full([self.clip_len], -1, dtype=torch.int32)
         attempts = 0
         while (sample_indicies == -1).any():
-            start_idx = self.sample_start_time(self.parser.data.gameStep)
-            end_idx = start_idx + self.clip_len * self.step_size
-            sample_indicies = find_closest_indicies(
-                self.parser.data.gameStep,
-                range(start_idx, end_idx, self.step_size),
+            sample_indicies = self.get_sample_indicies_from_start(
+                self.sample_start_time(self.parser.data.gameStep)
             )
             attempts += 1
             if attempts > 100:
@@ -516,6 +511,66 @@ class DaliReplayClipDataset(BaseDALIDataset):
                     "Maximum iteration attempt exceeded for replay: "
                     f"{self.parser.info.replayHash}, {self.parser.info.playerId}"
                 )
+        return sample_indicies
+
+    def load_valid_indicies(self, shuffle=True):
+        """
+        Read the valid sequence file and find the replay hash and player id
+        """
+        assert self.valid_clip_file is not None
+        assert self.parser is not None
+        filters = [
+            ("replayHash", "==", self.parser.info.replayHash),
+            ("playerId", "==", self.parser.info.playerId),
+        ]
+        valid_data = pd.read_parquet(self.valid_clip_file, filters=filters)[
+            "validMasks"
+        ]
+        self.valid_indicies = np.argwhere(np.array(map(int, valid_data)) == 1)
+        if shuffle:
+            np.random.shuffle(self.valid_indicies)
+
+    def get_sequence_with_mask_file(self, offset: int):
+        """
+        Get the valid sequence with an offset from the randomly shuffled set
+        """
+        assert self.valid_indicies is not None
+        sample_indicies = self.get_sample_indicies_from_start(
+            self.valid_indicies[offset]
+        )
+        if not (sample_indicies != -1).all():
+            raise RuntimeError(
+                f"Got invalid sample {self.valid_indicies[offset]} from mask at "
+                f"{self.parser.info.replayHash}, {self.parser.info.playerId}"
+            )
+        return sample_indicies
+
+    def get_sample_indicies_from_start(self, start_idx: int):
+        """Get the replay indicies to create the sequence"""
+        end_idx = start_idx + self.clip_len * self.step_size
+        sample_indicies = find_closest_indicies(
+            self.parser.data.gameStep,
+            range(start_idx, end_idx, self.step_size),
+        )
+        return sample_indicies
+
+    def get_sample_indicies(self, offset: int = 0):
+        """Get the indicies of the replay to sample"""
+        return (
+            self.get_sequence_no_mask_file()
+            if self.valid_clip_file is None
+            else self.get_sequence_with_mask_file(offset)
+        )
+
+    def process_replay(self, sample_indicies: Tensor):
+        assert self.parser is not None
+        try:
+            test_sample: dict[str, Any] = self.parser.sample(0)
+        except (RuntimeError, IndexError) as err:
+            raise RuntimeError(f"Parse failure for {self.parser.info}") from err
+
+        feature_keys = test_sample.keys() if self.features is None else self.features
+        outputs_list = {k: [] for k in feature_keys}
 
         for idx in sample_indicies:
             sample = self.parser.sample(int(idx.item()))
@@ -541,13 +596,21 @@ class DaliReplayClipDataset(BaseDALIDataset):
             raise FileNotFoundError(replay_file)
         replay_data = self.db_handle.getEntry(replay_idx)
         self.parser.parse_replay(replay_data)
+
+        if self.valid_clip_file is None:
+            self.load_valid_indicies(shuffle=True)
+
         if self.yields_batch:
-            samples = [self.process_replay() for _ in range(self.batch_size)]
-            outputs = []
-            for idx in range(len(samples[0])):
-                outputs.append(np.stack([s[idx] for s in samples]))
+            samples = [
+                self.process_replay(self.get_sample_indicies(i))
+                for i in range(self.batch_size)
+            ]
+            # Batch each of the properties
+            outputs = [
+                np.stack([s[idx] for s in samples]) for idx in range(len(samples[0]))
+            ]
         else:
-            outputs = self.process_replay()
+            outputs = self.process_replay(self.get_sample_indicies())
         return outputs
 
 
@@ -572,6 +635,10 @@ class DaliReplayClipConfig(DatasetConfig):
     metadata: bool = False
     yields_batch: bool = False
 
+    # Precalculated valid start indicies of clip to yield
+    # filename is calculated replay_mask_{int(step_sec*22.4)}_{clip_len}
+    valid_clip_file: Path | None = None
+
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
         if "amp" in config.trainer:
@@ -584,6 +651,10 @@ class DaliReplayClipConfig(DatasetConfig):
         ), f"Duplicate keys in features: {self.features}"
         if not isinstance(self.sampler_cfg, ModuleInitConfig):
             self.sampler_cfg = ModuleInitConfig(**self.sampler_cfg)
+        if self.valid_clip_file is not None:
+            self.valid_clip_file /= (
+                f"replay_mask_{int(self.step_sec*22.4)}_{self.clip_len}.parquet"
+            )
 
     @property
     def properties(self) -> dict[str, Any]:
