@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Annotated, Callable
 
 import torch
-from ffmpegcv import VideoWriter, FFmpegWriter
 import numpy as np
 import typer
 import yaml
@@ -26,6 +25,12 @@ from src.data.utils import find_closest_indicies
 from src.utils import StrEnum
 from src.data.replay_sampler import SQLSampler
 from torch import Tensor
+
+try:
+    from ffmpegcv import VideoWriter, FFmpegWriter
+except ImportError:
+    VideoWriter = None
+    FFmpegWriter = None
 
 app = typer.Typer()
 
@@ -244,9 +249,15 @@ def write_valid_stride_files(
 
     start_idx, end_idx = get_partition_start_end_idx(len(sampler))
 
-    replayHashes = pd.Series(index=range(start_idx, end_idx), dtype=pd.StringDtype())
-    playerIds = pd.Series(index=range(start_idx, end_idx), dtype=pd.Int32Dtype())
-    validMasks = pd.Series(index=range(start_idx, end_idx), dtype=pd.StringDtype())
+    replayHashes = pd.Series(
+        name="replayHashes", index=range(start_idx, end_idx), dtype=pd.StringDtype()
+    )
+    playerIds = pd.Series(
+        name="playerIds", index=range(start_idx, end_idx), dtype=pd.Int32Dtype()
+    )
+    validMasks = pd.Series(
+        name="validMasks", index=range(start_idx, end_idx), dtype=pd.StringDtype()
+    )
 
     with make_pbar(end_idx - start_idx, "Creating Masks", live) as pbar:
         for idx in range(start_idx, end_idx):
