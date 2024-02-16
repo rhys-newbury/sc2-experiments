@@ -249,6 +249,8 @@ def write_valid_stride_files(
 
     start_idx, end_idx = get_partition_start_end_idx(len(sampler))
 
+    print(f"Running over {start_idx} to {end_idx}")
+
     replayHashes = pd.Series(
         name="replayHashes", index=range(start_idx, end_idx), dtype=pd.StringDtype()
     )
@@ -260,16 +262,17 @@ def write_valid_stride_files(
     )
 
     with make_pbar(end_idx - start_idx, "Creating Masks", live) as pbar:
-        for idx in range(start_idx, end_idx):
-            path, sidx = sampler.sample(idx)
+        for sample_idx in range(start_idx, end_idx):
+            path, sidx = sampler.sample(sample_idx)
             db.load(path)
             replay = db.getEntry(sidx)
             indicies = get_valid_start_indicies(
                 replay.data.gameStep, step_game, sequence_len
             )
-            replayHashes.iloc[idx] = replay.header.replayHash
-            playerIds.iloc[idx] = replay.header.playerId
-            validMasks.iloc[idx] = "".join(
+            write_idx = sample_idx - start_idx
+            replayHashes.iloc[write_idx] = replay.header.replayHash
+            playerIds.iloc[write_idx] = replay.header.playerId
+            validMasks.iloc[write_idx] = "".join(
                 str(x.item()) for x in indicies.astype(np.uint8)
             )
 
