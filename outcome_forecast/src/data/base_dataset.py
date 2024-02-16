@@ -520,13 +520,23 @@ class DaliReplayClipDataset(BaseDALIDataset):
         assert self.valid_clip_file is not None
         assert self.parser is not None
         filters = [
-            ("replayHash", "==", self.parser.info.replayHash),
-            ("playerId", "==", self.parser.info.playerId),
+            ("replayHashes", "==", self.parser.info.replayHash),
+            ("playerIds", "==", self.parser.info.playerId),
         ]
         valid_data = pd.read_parquet(self.valid_clip_file, filters=filters)[
             "validMasks"
         ]
+        if valid_data.size == 0:
+            raise KeyError(
+                f"Can't find replayHash {self.parser.info.replayHash} and "
+                f"playerId {self.parser.info.playerId} in {self.valid_clip_file}"
+            )
         self.valid_indicies = np.argwhere(np.array(map(int, valid_data)) == 1)
+        if self.valid_indicies.size == 0:
+            raise ValueError(
+                f"Literally no valid sequences in {self.parser.info.replayHash}, "
+                f"{self.parser.info.playerId}"
+            )
         if shuffle:
             np.random.shuffle(self.valid_indicies)
 
@@ -536,9 +546,9 @@ class DaliReplayClipDataset(BaseDALIDataset):
         """
         assert self.valid_indicies is not None
         sample_indicies = self.get_sample_indicies_from_start(
-            self.valid_indicies[offset]
+            self.valid_indicies[offset % len(self.valid_indicies)]
         )
-        if not (sample_indicies != -1).all():
+        if (sample_indicies == -1).any():
             raise RuntimeError(
                 f"Got invalid sample {self.valid_indicies[offset]} from mask at "
                 f"{self.parser.info.replayHash}, {self.parser.info.playerId}"
@@ -597,7 +607,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         replay_data = self.db_handle.getEntry(replay_idx)
         self.parser.parse_replay(replay_data)
 
-        if self.valid_clip_file is None:
+        if self.valid_clip_file is not None:
             self.load_valid_indicies(shuffle=True)
 
         if self.yields_batch:
@@ -635,8 +645,9 @@ class DaliReplayClipConfig(DatasetConfig):
     metadata: bool = False
     yields_batch: bool = False
 
-    # Precalculated valid start indicies of clip to yield
-    # filename is calculated replay_mask_{int(step_sec*22.4)}_{clip_len}
+    # Precalculated valid start indicies of clip to yield, this variable
+    # should actually be a path to the directory its contained, and the
+    # filename is calculated replay_mask_{int(step_sec*22.4)}_{clip_len+1}
     valid_clip_file: Path | None = None
 
     @classmethod
@@ -651,10 +662,17 @@ class DaliReplayClipConfig(DatasetConfig):
         ), f"Duplicate keys in features: {self.features}"
         if not isinstance(self.sampler_cfg, ModuleInitConfig):
             self.sampler_cfg = ModuleInitConfig(**self.sampler_cfg)
+
         if self.valid_clip_file is not None:
+            if not isinstance(self.valid_clip_file, Path):
+                self.valid_clip_file = Path(self.valid_clip_file)
             self.valid_clip_file /= (
-                f"replay_mask_{int(self.step_sec*22.4)}_{self.clip_len}.parquet"
+                f"replay_mask_{int(self.step_sec*22.4)}_{self.clip_len+1}.parquet"
             )
+            if not self.valid_clip_file.exists():
+                raise FileNotFoundError(
+                    f"Valid clip file not found: {self.valid_clip_file}"
+                )
 
     @property
     def properties(self) -> dict[str, Any]:
