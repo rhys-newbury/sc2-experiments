@@ -309,6 +309,17 @@ def merge_valid_stride_files(
                 pbar.update(1)
 
 
+@app.command()
+def mask_analysis():
+    pqfile = Path("/media/bryce/nfs/minimap-experiments/replay_mask_67_9.parquet")
+    data = pd.read_parquet(pqfile)
+    intMask = data["validMasks"].map(
+        lambda x: np.frombuffer(x.encode("utf-8"), "i1") - 48
+    )
+    numValidPerReplay = intMask.map(np.sum)
+    numInvalidReplays = numValidPerReplay[numValidPerReplay == 0].sum()
+
+
 if __name__ == "__main__":
     set_replay_database_logger_level(spdlog_lvl.warn)
     app()

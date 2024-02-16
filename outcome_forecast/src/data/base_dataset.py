@@ -523,15 +523,14 @@ class DaliReplayClipDataset(BaseDALIDataset):
             ("replayHashes", "==", self.parser.info.replayHash),
             ("playerIds", "==", self.parser.info.playerId),
         ]
-        valid_data = pd.read_parquet(self.valid_clip_file, filters=filters)[
-            "validMasks"
-        ]
+        valid_data = pd.read_parquet(self.valid_clip_file, filters=filters)
         if valid_data.size == 0:
             raise KeyError(
                 f"Can't find replayHash {self.parser.info.replayHash} and "
                 f"playerId {self.parser.info.playerId} in {self.valid_clip_file}"
             )
-        self.valid_indicies = np.argwhere(np.array(map(int, valid_data)) == 1)
+        mask_data = np.frombuffer(valid_data.iloc[0].validMasks.encode("utf-8"), "i1")
+        self.valid_indicies = np.argwhere(mask_data == ord("1"))
         if self.valid_indicies.size == 0:
             raise ValueError(
                 f"Literally no valid sequences in {self.parser.info.replayHash}, "
