@@ -2,23 +2,30 @@
 Data transform utilities
 """
 
+import os
 from pathlib import Path
-from typing import Callable
+from typing import Annotated, Callable
 
 import torch
 from ffmpegcv import VideoWriter, FFmpegWriter
 import numpy as np
 import typer
 import yaml
+import pandas as pd
 from konductor.data import make_from_init_config
 from konductor.init import DatasetInitConfig
 from konductor.registry import Registry
 from konductor.utilities.pbar import IntervalPbar, LivePbar
-from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
+from sc2_replay_reader import (
+    set_replay_database_logger_level,
+    spdlog_lvl,
+    ReplayDataScalarOnlyDatabase,
+)
 from src.data.base_dataset import Split
+from src.data.utils import find_closest_indicies
 from src.utils import StrEnum
+from src.data.replay_sampler import SQLSampler
 from torch import Tensor
-from typing_extensions import Annotated
 
 app = typer.Typer()
 
@@ -51,10 +58,10 @@ def save_dataset_configuration(config_dict: dict[str, object], outfolder: Path):
         yaml.dump(config_dict, f)
 
 
-def make_pbar(dataloader, desc: str, live: bool):
+def make_pbar(total: int, desc: str, live: bool):
     """Make pbar live or fraction depending on flag"""
     pbar_type = LivePbar if live else IntervalPbar
-    pbar_kwargs = {"total": len(dataloader), "desc": desc}
+    pbar_kwargs = {"total": total, "desc": desc}
     if not live:
         pbar_kwargs["fraction"] = 0.1
     return pbar_type(**pbar_kwargs)
@@ -62,7 +69,7 @@ def make_pbar(dataloader, desc: str, live: bool):
 
 def convert_to_numpy_files(outfolder: Path, dataloader, live: bool):
     """Run conversion and write to outfolder"""
-    with make_pbar(dataloader, outfolder.stem, live) as pbar:
+    with make_pbar(len(dataloader), outfolder.stem, live) as pbar:
         for sample in dataloader:
             # Unwrap batch dim and change torch tensor to numpy array
             formatted: dict[str, str | np.ndarray] = {}
@@ -132,7 +139,7 @@ def convert_minimaps_to_videos(
     outfolder: Path, dataloader, live: bool, writer: WriterFn
 ):
     """Write each minimap sequence as a video file"""
-    with make_pbar(dataloader, outfolder.stem, live) as pbar:
+    with make_pbar(len(dataloader), outfolder.stem, live) as pbar:
         for sample_ in dataloader:
             sample = sample_[0] if isinstance(sample_, list) else sample_
             outpath: Path = outfolder / (sample["metadata"][0] + ".mp4")
@@ -166,6 +173,100 @@ def make_minimap_videos(
         outsubfolder = output / split.name.lower()
         outsubfolder.mkdir(exist_ok=True)
         convert_minimaps_to_videos(outsubfolder, dataloader, live, writer_func)
+
+
+def get_valid_start_indicies(game_step: list[int], stride: int, length: int):
+    """Gather all the start indicies of length with stride in a replay"""
+    valid_starts = np.zeros(len(game_step), dtype=bool)
+    for start_idx, start_val in enumerate(game_step):
+        end_val = start_val + stride * length
+        step_indicies = find_closest_indicies(
+            game_step[start_idx:], range(start_val, end_val, stride)
+        )
+        valid_starts[start_idx] = (step_indicies != -1).all()
+    return valid_starts
+
+
+def sampler_from_config(conf_file: Path) -> SQLSampler:
+    """Get SQLSampler from config file"""
+    with open(conf_file, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    # Unwrap nested configuration if necessary
+    if "dataset" in config:
+        config = config["dataset"][0]["args"]
+    if "sampler_cfg" in config:
+        assert config["sampler_cfg"]["type"] == "sql"
+        config = config["sampler_cfg"]["args"]
+
+    sampler = SQLSampler(
+        replays_path=Path(os.environ["DATAPATH"]),
+        split=Split.TRAIN,
+        train_ratio=1.0,
+        **config,
+    )
+
+    return sampler
+
+
+def get_partition_start_end_idx(total_len: int):
+    """Query pod index if exists, otherwise use full range"""
+    if "POD_NAME" in os.environ:
+        pod_idx = int(os.environ["POD_NAME"].split("-")[-1])
+        replicas = int(os.environ["REPLICAS"])
+        chunk_size = total_len // replicas
+        start_idx = pod_idx * chunk_size
+        if pod_idx + 1 == replicas:
+            end_idx = total_len
+        else:
+            end_idx = start_idx + chunk_size
+    else:
+        start_idx = 0
+        end_idx = total_len
+    return start_idx, end_idx
+
+
+@app.command()
+def write_valid_stride_files(
+    config: Annotated[Path, typer.Option()],
+    output: Annotated[Path, typer.Option()],
+    step_sec: Annotated[float, typer.Option()],
+    sequence_len: Annotated[int, typer.Option()],
+    live: Annotated[bool, typer.Option(help="Use live pbar")] = False,
+):
+    """Find valid strides and write to file"""
+
+    sampler = sampler_from_config(config)
+
+    db = ReplayDataScalarOnlyDatabase()
+
+    step_game = int(step_sec * 22.4)
+
+    start_idx, end_idx = get_partition_start_end_idx(len(sampler))
+
+    replayHashes = pd.Series(index=range(start_idx, end_idx), dtype=pd.StringDtype())
+    playerIds = pd.Series(index=range(start_idx, end_idx), dtype=pd.Int32Dtype())
+    validMasks = pd.Series(index=range(start_idx, end_idx), dtype=pd.StringDtype())
+
+    with make_pbar(end_idx - start_idx, "Creating Masks", live) as pbar:
+        for idx in range(start_idx, end_idx):
+            path, sidx = sampler.sample(idx)
+            db.load(path)
+            replay = db.getEntry(sidx)
+            indicies = get_valid_start_indicies(
+                replay.data.gameStep, step_game, sequence_len
+            )
+            replayHashes.iloc[idx] = replay.header.replayHash
+            playerIds.iloc[idx] = replay.header.playerId
+            validMasks.iloc[idx] = "".join(
+                str(x.item()) for x in indicies.astype(np.uint8)
+            )
+
+            pbar.update(1)
+
+    output /= f"replay_mask_{step_game}_{sequence_len}_{start_idx}_{end_idx}.parquet"
+    mask_data = pd.concat([replayHashes, playerIds, validMasks], axis=1)
+    mask_data.to_parquet(output, compression=None)
 
 
 if __name__ == "__main__":

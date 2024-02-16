@@ -32,6 +32,7 @@ def find_closest_indicies(options: Sequence[int], targets: Sequence[int]):
             continue
         if prv <= targets[tgt_idx] <= nxt:
             nearest[tgt_idx] = idx
+            nearest[tgt_idx] += (targets[tgt_idx] - prv) > (nxt - targets[tgt_idx])
             tgt_idx += 1
             if tgt_idx == nearest.nelement():
                 break
