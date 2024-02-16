@@ -11,6 +11,7 @@ import numpy as np
 import typer
 import yaml
 import pandas as pd
+from pyarrow import parquet as pq
 from konductor.data import make_from_init_config
 from konductor.init import DatasetInitConfig
 from konductor.registry import Registry
@@ -281,6 +282,31 @@ def write_valid_stride_files(
     output /= f"replay_mask_{step_game}_{sequence_len}_{start_idx}_{end_idx}.parquet"
     mask_data = pd.concat([replayHashes, playerIds, validMasks], axis=1)
     mask_data.to_parquet(output, compression=None)
+
+
+@app.command()
+def merge_valid_stride_files(
+    path: Annotated[Path, typer.Option()],
+    step_sec: Annotated[float, typer.Option()],
+    sequence_len: Annotated[int, typer.Option()],
+):
+    """Merges replay mask shards to single file"""
+    filestem = f"replay_mask_{int(step_sec * 22.4)}_{sequence_len}"
+    shards = list(path.glob(f"{filestem}_*.parquet"))
+    if len(shards) == 0:
+        raise FileNotFoundError(f"No shards matching {filestem} in {path}")
+
+    # Sort by start index of shard
+    shards = sorted(shards, key=lambda p: int(p.stem.split("_")[4]))
+
+    metadata = pq.read_metadata(shards[0])
+
+    with pq.ParquetWriter(path / f"{filestem}.parquet", metadata.schema) as writer:
+        with LivePbar(total=len(shards), desc="Merging files") as pbar:
+            for shard in shards:
+                data = pq.read_table(shard)
+                writer.write_table(data)
+                pbar.update(1)
 
 
 if __name__ == "__main__":
