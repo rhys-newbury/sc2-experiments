@@ -169,6 +169,8 @@ def write_minimap_forecast_results(
     dataFolder.mkdir(exist_ok=True)
 
     metadata = metadata_to_str(data["metadata"])
+    if all(m == metadata[0] for m in metadata):  # If batch from  same replay append idx
+        metadata = [m + str(i) for i, m in enumerate(metadata)]
     pred_sig = preds.sigmoid()
 
     targets = data["minimap_features"][:, :, [-4, -1]]
