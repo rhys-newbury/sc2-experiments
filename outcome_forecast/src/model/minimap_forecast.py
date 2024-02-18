@@ -13,6 +13,18 @@ from konductor.models import MODEL_REGISTRY, ExperimentInitConfig
 from konductor.models._pytorch import TorchModelConfig
 
 
+def _make_mlp(in_ch: int, hidden_ch: int, out_ch: int | None = None):
+    """If out_ch is None default to in_ch"""
+    if out_ch is None:
+        out_ch = in_ch
+    return nn.Sequential(
+        nn.LayerNorm(in_ch),
+        nn.Linear(in_ch, hidden_ch),
+        nn.GELU(),
+        nn.Linear(hidden_ch, out_ch),
+    )
+
+
 @MODEL_REGISTRY.register_module("temporal-conv")
 class TemporalConv(nn.Sequential):
     def __init__(
@@ -154,18 +166,12 @@ class CrossAttentionBlockV1(nn.Module):
             dropout=dropout,
             batch_first=True,
         )
-        self.middle_mlp = CrossAttentionBlockV1.make_mlp(q_ch)
+        self.middle_mlp = _make_mlp(q_ch, q_ch * 2)
         self.middle_norm = nn.LayerNorm(q_ch)
         self.s_attn = nn.MultiheadAttention(
             embed_dim=q_ch, num_heads=num_heads, batch_first=True, dropout=dropout
         )
-        self.out_mlp = CrossAttentionBlockV1.make_mlp(q_ch)
-
-    @staticmethod
-    def make_mlp(ch: int):
-        return nn.Sequential(
-            nn.LayerNorm(ch), nn.Linear(ch, ch), nn.GELU(), nn.Linear(ch, ch)
-        )
+        self.out_mlp = _make_mlp(q_ch, q_ch * 2)
 
     def forward(self, query: Tensor, keyvalue: Tensor):
         inter: Tensor
@@ -230,15 +236,17 @@ class PosQueryDecoder(nn.Module):
             num_heads=num_heads,
             batch_first=True,
         )
-        self.linear = nn.Linear(self.queries.shape[-1], output_dim)
+        self.linear = _make_mlp(
+            self.queries.shape[-1], self.queries.shape[-1] * 2, output_dim
+        )
 
     def forward(self, latent: Tensor):
         queries = self.queries[None].expand(latent.shape[0], *self.queries.shape)
         in_norm = self.input_norm(latent)
         decoded: Tensor = self.decoder(queries, in_norm, in_norm)[0]
-        decoded = self.linear(decoded)
-        decoded = decoded.permute(0, 2, 1)  # spatial last
-        decoded = decoded.reshape(latent.shape[0], -1, *self.out_shape)
+        out: Tensor = self.linear(decoded)
+        out = out.permute(0, 2, 1)  # spatial last
+        out = out.reshape(latent.shape[0], -1, *self.out_shape)
         return decoded
 
 
