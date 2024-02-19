@@ -247,7 +247,7 @@ class PosQueryDecoder(nn.Module):
         out: Tensor = self.linear(decoded)
         out = out.permute(0, 2, 1)  # spatial last
         out = out.reshape(latent.shape[0], -1, *self.out_shape)
-        return decoded
+        return out
 
 
 def make_sinusoid_encodings(

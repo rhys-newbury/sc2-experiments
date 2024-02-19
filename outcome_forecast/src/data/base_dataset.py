@@ -545,9 +545,11 @@ class DaliReplayClipDataset(BaseDALIDataset):
         """
         assert self.valid_indicies is not None
         sample_indicies = self.get_sample_indicies_from_start(
-            self.parser.data.gameStep[self.valid_indicies[offset % len(self.valid_indicies)].item()]
+            self.parser.data.gameStep[
+                self.valid_indicies[offset % len(self.valid_indicies)].item()
+            ]
         )
-        if (sample_indicies == -1).any(): 
+        if (sample_indicies == -1).any():
             if retry_depth > 128:  # You gotta be kidding me
                 raise RuntimeError(
                     f"Got invalid sample {self.valid_indicies[offset]} from mask at "
@@ -649,6 +651,8 @@ class DaliReplayClipConfig(DatasetConfig):
     # Precalculated valid start indicies of clip to yield, this variable
     # should actually be a path to the directory its contained, and the
     # filename is calculated replay_mask_{int(step_sec*22.4)}_{clip_len+1}
+    # the sampler configuration for this experiment should be strictly equal
+    # or a subset of the sampler configuration used to generate the clip file
     valid_clip_file: Path | None = None
 
     @classmethod
@@ -665,6 +669,8 @@ class DaliReplayClipConfig(DatasetConfig):
             self.sampler_cfg = ModuleInitConfig(**self.sampler_cfg)
 
         if self.valid_clip_file is not None:
+            if isinstance(self.valid_clip_file, str) and self.valid_clip_file == "$ENV":
+                self.valid_clip_file = self.basepath
             if not isinstance(self.valid_clip_file, Path):
                 self.valid_clip_file = Path(self.valid_clip_file)
             self.valid_clip_file /= (
