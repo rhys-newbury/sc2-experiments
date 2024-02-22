@@ -648,12 +648,12 @@ class DaliReplayClipConfig(DatasetConfig):
     metadata: bool = False
     yields_batch: bool = False
 
-    # Precalculated valid start indicies of clip to yield, this variable
-    # should actually be a path to the directory its contained, and the
-    # filename is calculated replay_mask_{int(step_sec*22.4)}_{clip_len+1}
-    # the sampler configuration for this experiment should be strictly equal
-    # or a subset of the sampler configuration used to generate the clip file
+    # Precalculated valid start indicies of clip to yield, this is calculated from the
+    # basepath and the filename is calculated replay_mask_{int(step_sec*22.4)}_{clip_len+1}
+    # the sampler configuration for this experiment should be strictly equal or a subset
+    # of the sampler configuration used to generate the clip file
     valid_clip_file: Path | None = None
+    precalculated_clips: bool = False
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
@@ -668,9 +668,10 @@ class DaliReplayClipConfig(DatasetConfig):
         if not isinstance(self.sampler_cfg, ModuleInitConfig):
             self.sampler_cfg = ModuleInitConfig(**self.sampler_cfg)
 
-        if self.valid_clip_file is not None:
-            if isinstance(self.valid_clip_file, str) and self.valid_clip_file == "$ENV":
-                self.valid_clip_file = self.basepath
+        # Precalculated sequence should be in the root directory of the data
+        # self.valid_clip_file is depricated in favour of just a flag that enables it
+        if self.valid_clip_file is not None or self.precalculated_clips:
+            self.valid_clip_file = self.basepath
             if not isinstance(self.valid_clip_file, Path):
                 self.valid_clip_file = Path(self.valid_clip_file)
             self.valid_clip_file /= (
