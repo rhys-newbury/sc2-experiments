@@ -1,0 +1,63 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  name: sc2-valid-seq
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  schedulerName: volcano
+  queue: default
+  tasks:
+    - replicas: 16
+      name: create
+      template:
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: dkr-creds
+          securityContext:
+            runAsUser: 1000
+          containers:
+            - name: runner
+              image: mu00120825.eng.monash.edu.au:5000/sc2-experiments:master
+              imagePullPolicy: Always
+              command:
+                [
+                  python3,
+                  -u,
+                  /app/outcome_forecast/data.py,
+                  write-valid-stride-files,
+                  --config=/mnt/storage/minimap-experiments/stride-mask.yml,
+                  --step-sec=3,
+                  --sequence-len=9,
+                  --output=/mnt/storage/minimap-experiments/mask-shards-tournament,
+                ]
+              env:
+                - name: DATAPATH
+                  value: /mnt/storage/converted/tournaments
+                - name: POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+                - name: REPLICAS
+                  value: "16"
+              resources:
+                requests:
+                  memory: 8Gi
+                  cpu: 1000m
+                limits:
+                  memory: 16Gi
+                  cpu: 2000m
+              volumeMounts:
+                - name: storage
+                  mountPath: /mnt/storage
+                - name: dshm
+                  mountPath: /dev/shm
+          volumes:
+            - name: storage
+              nfs:
+                server: 130.194.128.238
+                path: /mnt/fast/more-users/bryce-rhys
+            - name: dshm
+              emptyDir:
+                medium: Memory

@@ -169,3 +169,4 @@ outcome_forecast/wandb/
 *.scores
 *.tf_record
 *.db
+*manifest
