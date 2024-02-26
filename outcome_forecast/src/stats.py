@@ -13,8 +13,6 @@ from konductor.models import get_model_config
 from konductor.init import ExperimentInitConfig
 from konductor.metadata.base_statistic import Statistic, STATISTICS_REGISTRY
 
-from .utils import get_valid_sequence_mask
-
 
 @dataclass
 class Confusion:

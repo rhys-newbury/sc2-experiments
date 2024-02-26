@@ -35,5 +35,5 @@ def random_rotate(minimaps: DataNode, angle_deg: float):
 
 @DALI_AUGMENTATIONS.register_module("permute-dims")
 def permute_dims(minimaps: DataNode, dst: Sequence[int]):
-    """Permute/transpose dimensions with a list of indicies, i.e. [1,2,0] to go from CHW to HWC"""
+    """Permute/transpose dimensions with a list of indices, i.e. [1,2,0] to go from CHW to HWC"""
     return fn.transpose(minimaps, perm=dst)

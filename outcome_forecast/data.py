@@ -22,7 +22,7 @@ from sc2_replay_reader import (
     ReplayDataScalarOnlyDatabase,
 )
 from src.data.base_dataset import Split
-from src.data.utils import find_closest_indicies
+from src.data.utils import find_closest_indices
 from src.utils import StrEnum
 from src.data.replay_sampler import SQLSampler
 from torch import Tensor
@@ -181,15 +181,15 @@ def make_minimap_videos(
         convert_minimaps_to_videos(outsubfolder, dataloader, live, writer_func)
 
 
-def get_valid_start_indicies(game_step: list[int], stride: int, length: int):
-    """Gather all the start indicies of length with stride in a replay"""
+def get_valid_start_indices(game_step: list[int], stride: int, length: int):
+    """Gather all the start indices of length with stride in a replay"""
     valid_starts = np.zeros(len(game_step), dtype=bool)
     for start_idx, start_val in enumerate(game_step):
         end_val = start_val + stride * length
-        step_indicies = find_closest_indicies(
+        step_indices = find_closest_indices(
             game_step[start_idx:], range(start_val, end_val, stride)
         )
-        valid_starts[start_idx] = (step_indicies != -1).all()
+        valid_starts[start_idx] = (step_indices != -1).all()
     return valid_starts
 
 
@@ -267,14 +267,14 @@ def write_valid_stride_files(
             path, sidx = sampler.sample(sample_idx)
             db.load(path)
             replay = db.getEntry(sidx)
-            indicies = get_valid_start_indicies(
+            indices = get_valid_start_indices(
                 replay.data.gameStep, step_game, sequence_len
             )
             write_idx = sample_idx - start_idx
             replayHashes.iloc[write_idx] = replay.header.replayHash
             playerIds.iloc[write_idx] = replay.header.playerId
             validMasks.iloc[write_idx] = "".join(
-                str(x.item()) for x in indicies.astype(np.uint8)
+                str(x.item()) for x in indices.astype(np.uint8)
             )
 
             pbar.update(1)
@@ -318,6 +318,7 @@ def mask_analysis():
     )
     numValidPerReplay = intMask.map(np.sum)
     numInvalidReplays = numValidPerReplay[numValidPerReplay == 0].sum()
+    print(f"Number of invalid replays: {numInvalidReplays}")
 
 
 if __name__ == "__main__":

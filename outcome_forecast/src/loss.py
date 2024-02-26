@@ -127,7 +127,7 @@ class MinimapFocal(nn.BCEWithLogitsLoss):
 
 @dataclass
 @REGISTRY.register_module("minimap-focal")
-class MinimapForecastBCE(LossConfig):
+class MinimapForecastFocal(LossConfig):
     history_len: int
     alpha: float = 0.75
     gamma: float = 0.2

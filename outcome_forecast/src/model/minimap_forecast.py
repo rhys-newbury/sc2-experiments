@@ -328,7 +328,7 @@ class TransformerForecasterV1(nn.Module):
         self.latent.normal_(0, 0.5).clamp_(-2.0, 2.0)
 
     def flatten_input_encodings(self, inputs: Tensor):
-        """Transform inputs [B,T,C,H,W] to [B,THW,C] and add position embeddings"""
+        """Transform inputs [B,T,C,H,W] to [B,T H W,C] and add position embeddings"""
         inputs = torch.permute(inputs, [0, 1, 3, 4, 2])
         f_num = 8 if self.latent_minimap_shape is None else self.latent_minimap_shape[0]
         pos_enc = make_sinusoid_encodings(inputs.shape[1:4], f_num, dev=inputs.device)

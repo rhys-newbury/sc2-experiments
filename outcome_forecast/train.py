@@ -56,9 +56,9 @@ class Trainer(PyTorchTrainer):
 
 def get_statistics(exp_cfg: ExperimentInitConfig) -> dict[str, Statistic]:
     """Determine what statistics to track depending on losses used"""
-    loss_types = [l.type for l in exp_cfg.criterion]
+    loss_types = [loss.type for loss in exp_cfg.criterion]
     stats: dict[str, Statistic] = {}
-    if any(l in {"win-bce"} for l in loss_types):
+    if any(loss in {"win-bce"} for loss in loss_types):
         stats.update(
             {
                 "win-auc": src.stats.WinAUC.from_config(exp_cfg),
@@ -66,7 +66,7 @@ def get_statistics(exp_cfg: ExperimentInitConfig) -> dict[str, Statistic]:
             }
         )
 
-    if any(l in {"minimap-bce", "minimap-focal"} for l in loss_types):
+    if any(loss in {"minimap-bce", "minimap-focal"} for loss in loss_types):
         stats["minimap-soft-iou"] = src.stats.MinimapSoftIoU.from_config(exp_cfg)
 
     if len(stats) == 0:

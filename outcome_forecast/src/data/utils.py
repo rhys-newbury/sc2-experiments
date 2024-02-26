@@ -17,7 +17,7 @@ def upper_bound(x: Tensor, value: float) -> int:
     return int(torch.argwhere(torch.le(x, value))[-1].item())
 
 
-def find_closest_indicies(options: Sequence[int], targets: Sequence[int]):
+def find_closest_indices(options: Sequence[int], targets: Sequence[int]):
     """
     Find the closest option corresponding to a target, if there is no match, place -1
     TODO Convert this to cpp
@@ -100,7 +100,7 @@ class BaseDALIDataset(ABC):
             _num_iter //= self.batch_size
         return _num_iter
 
-    def resample_indicies(self, epoch_idx: int):
+    def resample_indices(self, epoch_idx: int):
         self.last_seen_epoch = epoch_idx
         self.idx_samples = np.random.default_rng(seed=42 + epoch_idx).permutation(
             len(self)
@@ -114,7 +114,7 @@ class BaseDALIDataset(ABC):
             raise StopIteration
 
         if self.random_shuffle and yield_info.epoch_idx != self.last_seen_epoch:
-            self.resample_indicies(yield_info.epoch_idx)
+            self.resample_indices(yield_info.epoch_idx)
 
         idx = self.shard_id
         idx += (

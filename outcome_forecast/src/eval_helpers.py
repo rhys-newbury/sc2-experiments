@@ -201,12 +201,12 @@ def write_minimap_forecast_results(
         valid_seq = get_valid_sequence_mask(data["valid"], sequence_len + 1)
     else:
         valid_seq = torch.ones(targets.shape[0], 1, dtype=torch.bool)
-    indicies = torch.arange(valid_seq.shape[1], device=valid_seq.device) + sequence_len
+    indices = torch.arange(valid_seq.shape[1], device=valid_seq.device) + sequence_len
 
     for bidx in range(preds.shape[0]):
         prefix = metadata[bidx]
         # Only get a few random samples
-        rand_idxs: list[int] = [i.item() for i in indicies[valid_seq[bidx]].cpu()]
+        rand_idxs: list[int] = [i.item() for i in indices[valid_seq[bidx]].cpu()]
         random.shuffle(rand_idxs)
         rand_idxs = rand_idxs[:n_time]
 
