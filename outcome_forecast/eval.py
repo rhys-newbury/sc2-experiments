@@ -114,7 +114,7 @@ def evaluate(
     meta = Metadata.from_yaml(run_path / "metadata.yaml")
 
     with IntervalPbar(
-        total=len(dataloader), fraction=0.1
+        total=len(dataloader), fraction=0.1, desc="Evaluating Model..."
     ) as pbar, torch.inference_mode():
         for sample in dataloader:
             if isinstance(sample, list):
@@ -155,7 +155,9 @@ def evaluate_percent(
     interval = 100 / num_buckets
 
     with IntervalPbar(
-        total=len(dataloader), fraction=0.1
+        total=len(dataloader),
+        fraction=0.1,
+        desc="Predicting Game Outcome By Duration...",
     ) as pbar, torch.inference_mode():
         for sample in dataloader:
             if isinstance(sample, list):
@@ -274,7 +276,7 @@ def visualise_minimap_forecast(
 
     outdir = exp_config.exp_path / "images"
     outdir.mkdir(exist_ok=True)
-    with LivePbar(total=n_samples, desc="Generating Images") as pbar:
+    with LivePbar(total=n_samples, desc="Generating Minimap Predictions...") as pbar:
         for sample_ in dataloader:
             sample: dict[str, Tensor] = sample_[0]
             preds: Tensor = model(sample)
@@ -313,7 +315,7 @@ def single_replay_analysis(
         + [str(t.item()) for t in timepoints.arange()],
     )
 
-    with LivePbar(total=n_samples, desc="Generating Images") as pbar:
+    with LivePbar(total=n_samples, desc="Predicting Replay Outcomes...") as pbar:
         for sample_ in dataloader:
             sample: dict[str, Tensor] = sample_[0]
             preds: Tensor = model(sample)
@@ -323,6 +325,29 @@ def single_replay_analysis(
                 break
 
     results.to_csv(run_path / "outcome_prediction.csv")
+
+
+@app.command()
+def single_replay_analysis_all(
+    workspace: Annotated[Path, typer.Option()],
+    workers: Annotated[int, typer.Option()] = 4,
+    batch_size: Annotated[int, typer.Option()] = 16,
+    split: Annotated[Split, typer.Option()] = Split.VAL,
+    n_samples: Annotated[int, typer.Option()] = 16,
+):
+    """Run single-replay-analysis for all experiments in a workspace"""
+
+    def is_trained_experiment(path: Path):
+        """Must be trained experiment if checkpoint exists"""
+        return (path / "latest.pt").exists()
+
+    experiments = list(filter(is_trained_experiment, workspace.iterdir()))
+    for idx, item in enumerate(experiments, 1):
+        try:
+            single_replay_analysis(item, workers, batch_size, split, n_samples)
+        except RuntimeError as err:
+            print(f"Failed to run experiment {item.stem} with error: {err}")
+        print(f"Finised {idx} of {len(experiments)} experiments")
 
 
 if __name__ == "__main__":
