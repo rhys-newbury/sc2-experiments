@@ -6,6 +6,7 @@ from pathlib import Path
 
 import cv2
 import torch
+import pandas as pd
 from torch import nn, Tensor
 from torch.nn import functional as F
 from konductor.data import Split, get_dataset_config
@@ -36,7 +37,10 @@ def get_dataloader_with_metadata(
 ):
     """Get dataloader that also returns metadata (unique id associated with sample)"""
     dataset_cfg = get_dataset_config(exp_config)
-    dataset_cfg.metadata = True  # Need to add metadata list of keys to yield
+    if hasattr(dataset_cfg, "keys"):
+        dataset_cfg.keys.append("metadata")
+    else:
+        dataset_cfg.metadata = True  # Need to add metadata list of keys to yield
     return dataset_cfg.get_dataloader(split)
 
 
@@ -164,8 +168,7 @@ def write_gradient_sequence(
         for px_val, t_idx in zip(px_vals, range(end_idx - seq_len + 1, end_idx + 1)):
             base_image[data[t_idx, ch_idx]] = px_val
         cv2.imwrite(
-            str(dataFolder / f"{prefix}_{name}_seq.png"),
-            base_image.cpu().numpy(),
+            str(dataFolder / f"{prefix}_{name}_seq.png"), base_image.cpu().numpy()
         )
 
 
@@ -221,3 +224,23 @@ def write_minimap_forecast_results(
 
     with open(outdir / "samples.txt", "a") as f:
         f.writelines(m + "\n" for m in metadata)
+
+
+def write_outcome_prediction(
+    data: dict[str, Tensor], preds: Tensor, gidx: int, df: pd.DataFrame
+):
+    """Write the predicted outcome of the game over its duration"""
+    replay_names = metadata_to_str(data["metadata"])
+    for bidx in range(preds.shape[0]):
+        df_idx = gidx + bidx
+        if df_idx >= df.size:
+            break
+
+        row = df.iloc[gidx + bidx]
+        row["replay"] = replay_names[bidx]
+        row["outcome"] = bool(data["win"][bidx].item())
+        for tidx in range(preds.shape[1]):
+            if not data["valid"][bidx, tidx].item():
+                continue
+            col = df.columns[tidx + 2]
+            row[col] = preds[bidx, tidx].sigmoid().item()

@@ -23,8 +23,10 @@ from src.eval_helpers import (
     metadata_to_str,
     setup_eval_model_and_dataloader,
     write_minimap_forecast_results,
+    write_outcome_prediction,
 )
 from src.stats import BinaryAcc
+from src.utils import TimeRange
 from torch import Tensor
 
 app = typer.Typer()
@@ -286,6 +288,40 @@ def visualise_minimap_forecast(
     filenames = sorted(set(filenames))
     with open(outdir / "samples.txt", "w", encoding="utf-8") as f:
         f.write("".join(filenames))
+
+
+@app.command()
+@torch.inference_mode()
+def single_replay_analysis(
+    run_path: Annotated[Path, typer.Option()],
+    workers: Annotated[int, typer.Option()] = 4,
+    batch_size: Annotated[int, typer.Option()] = 16,
+    split: Annotated[Split, typer.Option()] = Split.VAL,
+    n_samples: Annotated[int, typer.Option()] = 16,
+):
+    """Record and plot the single replay outcome prediction over the duration of the replay"""
+    exp_config, model, dataloader = setup_eval_model_and_dataloader(
+        run_path, split=split, workers=workers, batch_size=batch_size
+    )
+
+    dataset_props = get_dataset_properties(exp_config)
+    timepoints: TimeRange = dataset_props["timepoints"]
+
+    results = pd.DataFrame(
+        index=pd.RangeIndex(0, n_samples),
+        columns=["replay", "outcome"] + [str(t.item()) for t in timepoints.arange()],
+    )
+
+    with LivePbar(total=n_samples, desc="Generating Images") as pbar:
+        for sample_ in dataloader:
+            sample: dict[str, Tensor] = sample_[0]
+            preds: Tensor = model(sample)
+            write_outcome_prediction(sample, preds, pbar.n, results)
+            pbar.update(preds.shape[0])
+            if pbar.n >= n_samples:
+                break
+
+    results.to_csv(run_path / "outcome_prediction.csv")
 
 
 if __name__ == "__main__":
