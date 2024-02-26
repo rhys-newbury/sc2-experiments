@@ -5,14 +5,15 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, callback, dcc, html
 from dash.exceptions import PreventUpdate
+from konductor.metadata.database import Metadata
 
 layout = html.Div(
     children=[
         html.H2("Replay Outcome Prediction"),
         dbc.Row(
             [
-                dbc.Col(html.H4("Experiment Hash:")),
-                dbc.Col(dcc.Dropdown(id="sr-experiments")),
+                dbc.Col(html.H4("Experiment:")),
+                dbc.Col(dcc.Dropdown(id="sr-run-brief")),
                 dbc.Col(html.H4("Replay:")),
                 dbc.Col(dcc.Dropdown(id="sr-replay-hash")),
             ]
@@ -21,33 +22,43 @@ layout = html.Div(
     ]
 )
 
+EXPERIMENTS: list[Metadata] = []
+
+
+def get_experiment_by_brief(brief: str):
+    return next(filter(lambda x: x.brief == brief, EXPERIMENTS))
+
 
 @callback(
-    Output("sr-experiments", "options"),
+    Output("sr-run-brief", "options"),
     Input("root-dir", "data"),
     prevent_initial_call=False,
 )
 def update_runs(root: str):
     if not root:
         raise PreventUpdate()
-    valid_runs = []
+
     for item in Path(root).iterdir():
         if (item / "outcome_prediction.csv").exists():
-            valid_runs.append(item.stem)
-    return valid_runs
+            exp_meta = Metadata.from_yaml(item / "metadata.yaml")
+            EXPERIMENTS.append(exp_meta)
+
+    return [exp.brief for exp in EXPERIMENTS]
 
 
 @callback(
     Output("sr-replay-hash", "options"),
     Input("root-dir", "data"),
-    Input("sr-experiments", "value"),
+    Input("sr-run-brief", "value"),
 )
-def update_replays(root: str, run_hash: str):
+def update_replays(root: str, run_brief: str):
     """Update the list of replays to choose from"""
-    if not root or not run_hash:
+    if not root or not run_brief:
         raise PreventUpdate()
 
-    data = pd.read_csv(Path(root) / run_hash / "outcome_prediction.csv")
+    exp_meta = get_experiment_by_brief(run_brief)
+
+    data = pd.read_csv(exp_meta.filepath.parent / "outcome_prediction.csv")
 
     return list(data["replay"].unique())
 
@@ -55,14 +66,16 @@ def update_replays(root: str, run_hash: str):
 @callback(
     Output("sr-replay-preds", "figure"),
     Input("root-dir", "data"),
-    Input("sr-experiments", "value"),
+    Input("sr-run-brief", "value"),
     Input("sr-replay-hash", "value"),
 )
-def update_game_length(root: str, run_hash: str, replay_hash: str):
-    if not all((root, run_hash, replay_hash)):
+def update_game_length(root: str, run_brief: str, replay_hash: str):
+    if not all((root, run_brief, replay_hash)):
         raise PreventUpdate
 
-    data = pd.read_csv(Path(root) / run_hash / "outcome_prediction.csv")
+    exp_meta = get_experiment_by_brief(run_brief)
+
+    data = pd.read_csv(exp_meta.filepath.parent / "outcome_prediction.csv")
     col_to_rm = ["replay"]
     if "Unnamed: 0" in data.columns:
         col_to_rm.append("Unnamed: 0")
