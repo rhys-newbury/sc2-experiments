@@ -12,10 +12,10 @@ layout = html.Div(
         html.H2("Replay Outcome Prediction"),
         dbc.Row(
             [
-                dbc.Col(html.H4("Experiment:")),
-                dbc.Col(dcc.Dropdown(id="sr-run-brief")),
-                dbc.Col(html.H4("Replay:")),
-                dbc.Col(dcc.Dropdown(id="sr-replay-hash")),
+                dbc.Col(html.H4("Experiment:"), width="auto"),
+                dbc.Col(dcc.Dropdown(id="sr-run-brief"), width=True),
+                dbc.Col(html.H4("Replay:"), width="auto"),
+                dbc.Col(dcc.Dropdown(id="sr-replay-hash"), width=True),
             ]
         ),
         dbc.Row([dcc.Graph(id="sr-replay-preds", selectedData={})]),
