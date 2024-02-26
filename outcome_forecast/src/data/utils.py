@@ -67,6 +67,7 @@ class BaseDALIDataset(ABC):
         num_shards: int,
         random_shuffle: bool,
         yields_batch: bool = False,
+        prefetch_queue_depth: int = 2,
     ) -> None:
         self.logger = getLogger(type(self).__name__)
         self.shard_id = shard_id
@@ -76,6 +77,7 @@ class BaseDALIDataset(ABC):
         self.idx_samples: np.ndarray = np.zeros(0, dtype=np.int64)
         self.last_seen_epoch = -1
         self.yields_batch = yields_batch
+        self.prefetch_queue_depth = prefetch_queue_depth
 
     def _initialize(self):
         self.idx_samples = np.arange(len(self), dtype=np.int64)

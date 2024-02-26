@@ -354,8 +354,17 @@ class DaliFolderDataset(BaseDALIDataset):
         shard_id: int,
         num_shards: int,
         random_shuffle: bool,
+        yields_batch: bool = False,
+        prefetch_queue_depth: int = 2,
     ) -> None:
-        super().__init__(batch_size, shard_id, num_shards, random_shuffle)
+        super().__init__(
+            batch_size,
+            shard_id,
+            num_shards,
+            random_shuffle,
+            yields_batch,
+            prefetch_queue_depth,
+        )
         self.split = split
         self.keys = keys
         self.folder = path / split.name.lower()
@@ -403,6 +412,7 @@ class DaliFolderDatasetConfig(FolderDatasetConfig):
     val_loader: DaliLoaderConfig
     keys: list[str]  # List of items to read
     fp16_out: bool = False
+    prefetch_queue_depth: int = 4
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):
@@ -412,11 +422,10 @@ class DaliFolderDatasetConfig(FolderDatasetConfig):
 
     def _make_source(self, split: Split) -> DaliFolderDataset:
         loader = self.train_loader if split is Split.TRAIN else self.val_loader
+        pipe_kwargs = loader.pipe_kwargs()
+        del pipe_kwargs["prefetch_queue_depth"]  # Use config specific key
         source = self.init_auto_filter(
-            DaliFolderDataset,
-            path=self.basepath,
-            split=split,
-            **loader.pipe_kwargs(),
+            DaliFolderDataset, path=self.basepath, split=split, **pipe_kwargs
         )
         return source
 
@@ -451,11 +460,19 @@ class DaliReplayClipDataset(BaseDALIDataset):
         num_shards: int,
         random_shuffle: bool,
         yields_batch: bool = False,
+        prefetch_queue_depth: int = 2,
         metadata: bool = False,
         minimap_layers: list[str] | None = None,
         valid_clip_file: Path | None = None,
     ) -> None:
-        super().__init__(batch_size, shard_id, num_shards, random_shuffle)
+        super().__init__(
+            batch_size,
+            shard_id,
+            num_shards,
+            random_shuffle,
+            yields_batch,
+            prefetch_queue_depth,
+        )
         self.sampler_cfg = sampler_cfg
         self.sampler: ReplaySampler | None = None
         self.start_step = _min_to_game_step(start_min)
@@ -647,6 +664,7 @@ class DaliReplayClipConfig(DatasetConfig):
     fp16_out: bool = False
     metadata: bool = False
     yields_batch: bool = False
+    prefetch_queue_depth: int = 4
 
     # Precalculated valid start indicies of clip to yield, this is calculated from the
     # basepath and the filename is calculated replay_mask_{int(step_sec*22.4)}_{clip_len+1}
@@ -700,8 +718,10 @@ class DaliReplayClipConfig(DatasetConfig):
         sampler_cfg.args["split"] = split
         sampler_cfg.args["train_ratio"] = self.train_ratio
         sampler_cfg.args["replays_path"] = self.basepath
+        pipe_kwargs = loader.pipe_kwargs()
+        del pipe_kwargs["prefetch_queue_depth"]  # Use config specific key
         source = self.init_auto_filter(
-            DaliReplayClipDataset, sampler_cfg=sampler_cfg, **loader.pipe_kwargs()
+            DaliReplayClipDataset, sampler_cfg=sampler_cfg, **pipe_kwargs
         )
         return source
 
@@ -751,12 +771,7 @@ def apply_minimap_augs(minimaps: DataNode, augs: list[ModuleInitConfig]):
     return minimaps
 
 
-@pipeline_def(
-    py_start_method="spawn",
-    prefetch_queue_depth=2,
-    enable_conditionals=True,
-    py_num_workers=4,
-)
+@pipeline_def(py_start_method="spawn", enable_conditionals=True)
 def sc2_data_pipeline(
     shard_id: int,
     num_shards: int,
@@ -776,7 +791,7 @@ def sc2_data_pipeline(
         dtype=[_DTYPES[k].dtype for k in keys],
         ndim=[_DTYPES[k].ndim for k in keys],
         layout=[_DTYPES[k].layout for k in keys],
-        prefetch_queue_depth=4,
+        prefetch_queue_depth=source.prefetch_queue_depth,
     )
 
     def transform(data: DataNode, key: str):
