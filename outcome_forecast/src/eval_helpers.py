@@ -237,10 +237,11 @@ def write_outcome_prediction(
             break
 
         row = df.iloc[gidx + bidx]
-        row["replay"] = replay_names[bidx]
+        row["replay"] = replay_names[bidx][:-1]
+        row["playerId"] = int(replay_names[bidx][-1])
         row["outcome"] = bool(data["win"][bidx].item())
         for tidx in range(preds.shape[1]):
             if not data["valid"][bidx, tidx].item():
                 continue
-            col = df.columns[tidx + 2]
+            col = df.columns[tidx + 3]
             row[col] = preds[bidx, tidx].sigmoid().item()

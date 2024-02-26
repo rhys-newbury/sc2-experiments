@@ -96,8 +96,8 @@ def update_game_length(eval_folder: str, root: str):
 
     # Update layout
     fig.update_layout(
-        title="Outcome forecast acc over Game Length",
-        xaxis_title="% Game Length",
+        title="Outcome forecast acc over Game Duration",
+        xaxis_title="% Game Duration",
         yaxis_title="Accuracy (%)",
         yaxis_range=[0, 1],
     )

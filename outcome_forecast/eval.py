@@ -309,7 +309,8 @@ def single_replay_analysis(
 
     results = pd.DataFrame(
         index=pd.RangeIndex(0, n_samples),
-        columns=["replay", "outcome"] + [str(t.item()) for t in timepoints.arange()],
+        columns=["replay", "playerId", "outcome"]
+        + [str(t.item()) for t in timepoints.arange()],
     )
 
     with LivePbar(total=n_samples, desc="Generating Images") as pbar:
