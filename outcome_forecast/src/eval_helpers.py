@@ -150,6 +150,25 @@ def write_tiled_sequence(
         )
 
 
+def write_gradient_sequence(
+    data: Tensor, end_idx: int, seq_len: int, folder: Path, prefix: str
+):
+    """Display a sequence of frames as a ghost trail to indicate motion of units over time"""
+    px_vals = torch.linspace(200, 0, seq_len, dtype=torch.uint8, device=data.device)
+    dataFolder = folder / "data"
+    data = data.to(torch.bool)
+    for ch_idx, name in enumerate(["self", "enemy"]):
+        base_image = torch.full(
+            data.shape[-2:], 255, dtype=torch.uint8, device=data.device
+        )
+        for px_val, t_idx in zip(px_vals, range(end_idx - seq_len + 1, end_idx + 1)):
+            base_image[data[t_idx, ch_idx]] = px_val
+        cv2.imwrite(
+            str(dataFolder / f"{prefix}_{name}_seq.png"),
+            base_image.cpu().numpy(),
+        )
+
+
 def write_minimap_forecast_results(
     preds: Tensor,
     data: dict[str, Tensor],
@@ -196,7 +215,9 @@ def write_minimap_forecast_results(
             write_minimaps(
                 pred_sig[bidx, idx - sequence_len], targets[bidx, idx], outdir, prefix
             )
-            write_tiled_sequence(targets[bidx], idx, sequence_len + 1, outdir, prefix)
+            write_gradient_sequence(
+                targets[bidx], idx, sequence_len + 1, outdir, prefix
+            )
 
     with open(outdir / "samples.txt", "a") as f:
         f.writelines(m + "\n" for m in metadata)
