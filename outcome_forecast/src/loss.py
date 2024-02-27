@@ -157,9 +157,9 @@ class MinimapFocalMotion(MinimapFocal):
 
     @torch.no_grad()
     def _calc_motion(self, prev: Tensor, nxt: Tensor) -> Tensor:
-        """Calculate pixel-wise motion mask with weighting factor"""
-        mask = (prev != nxt).to(torch.float32) * self.motion_weight
-        return mask
+        """Calculate pixel-wise motion mask with weighting factor to emphasise loss"""
+        mask = (prev != nxt).float() * self.motion_weight
+        return mask + 1
 
     def forward(
         self, predictions: Tensor, targets: dict[str, Tensor]
