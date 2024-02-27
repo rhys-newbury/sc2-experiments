@@ -110,7 +110,7 @@ def write_minimaps(pred: Tensor, target: Tensor, folder: Path, prefix: str):
         )
 
         cv2.imwrite(
-            str(predFolder / f"{prefix}_diff_{name}.png"),
+            str(predFolder / f"{prefix}_{name}_diff.png"),
             create_score_frame(pred[idx], target[idx]).cpu().numpy(),
         )
 
