@@ -7,7 +7,8 @@ dataset:
       clip_len: 8
       features: ["minimap_features"]
       yields_batch: true
-      valid_clip_file: /media/bryce/nfs/minimap-experiments
+      train_ratio: 0.99
+      precalculated_clips: true
       sampler_cfg:
         type: sql
         args:
@@ -21,13 +22,13 @@ dataset:
     val_loader:
       type: DALI
       args:
-        batch_size: 128
+        batch_size: 64
         drop_last: true
     train_loader:
       type: DALI
       args:
         shuffle: true
-        batch_size: 128
+        batch_size: 64
         drop_last: true
         augmentations:
           - type: permute-dims # FCHW -> FHWC
@@ -43,7 +44,9 @@ dataset:
               dst: [0, 3, 1, 2]
 criterion:
   - type: minimap-focal
-    args: {}
+    args:
+      gamma: 2.0
+      alpha: 0.8
 model:
   - type: transformer-forecast-v1
     args:

@@ -3,10 +3,11 @@ dataset:
     args:
       start_min: 2
       end_min: 20
-      step_sec: 10
+      step_sec: 3
       clip_len: 8
       features: ["minimap_features"]
       yields_batch: true
+      precalculated_clips: true
       sampler_cfg:
         type: sql
         args:
@@ -15,17 +16,18 @@ dataset:
             - game_length > 6720
             - read_success = 1
             - parse_success = 1
-            - number_game_step > 512
+            - number_game_step > 1024
+            - playerAPM > 100
     val_loader:
       type: DALI
       args:
-        batch_size: 128
+        batch_size: 64
         drop_last: true
     train_loader:
       type: DALI
       args:
         shuffle: true
-        batch_size: 128
+        batch_size: 64
         drop_last: true
         augmentations:
           - type: permute-dims # FCHW -> FHWC
@@ -40,8 +42,10 @@ dataset:
             args:
               dst: [0, 3, 1, 2]
 criterion:
-  - type: minimap-focal
-    args: {}
+  - type: minimap-focal-motion
+    args:
+      gamma: 2
+      motion_weight: 3
 model:
   - type: conv-forecast-v1
     args:
@@ -77,7 +81,6 @@ model:
 logger:
   interval: 1000
 trainer:
-  amp: {}
   validation_interval: 10000
 checkpointer:
   mode: iteration
