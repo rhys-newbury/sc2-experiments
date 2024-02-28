@@ -56,9 +56,9 @@ class Trainer(PyTorchTrainer):
 
 def get_statistics(exp_cfg: ExperimentInitConfig) -> dict[str, Statistic]:
     """Determine what statistics to track depending on losses used"""
-    loss_types = [l.type for l in exp_cfg.criterion]
+    loss_types = [loss.type for loss in exp_cfg.criterion]
     stats: dict[str, Statistic] = {}
-    if any(l in {"win-bce"} for l in loss_types):
+    if any(loss.startswith("win") for loss in loss_types):
         stats.update(
             {
                 "win-auc": src.stats.WinAUC.from_config(exp_cfg),
@@ -66,7 +66,7 @@ def get_statistics(exp_cfg: ExperimentInitConfig) -> dict[str, Statistic]:
             }
         )
 
-    if any(l in {"minimap-bce", "minimap-focal"} for l in loss_types):
+    if any(loss.startswith("minimap") for loss in loss_types):
         stats["minimap-soft-iou"] = src.stats.MinimapSoftIoU.from_config(exp_cfg)
 
     if len(stats) == 0:
@@ -75,17 +75,36 @@ def get_statistics(exp_cfg: ExperimentInitConfig) -> dict[str, Statistic]:
     return stats
 
 
+def apply_dali_pipe_kwargs(
+    exp_cfg: ExperimentInitConfig,
+    py_workers: int,
+    pipe_prefetch: int,
+    source_prefetch: int,
+):
+    """Add dali specific pipeline args"""
+    exp_cfg.data[0].train_loader.args["py_num_workers"] = py_workers
+    exp_cfg.data[0].val_loader.args["py_num_workers"] = py_workers
+    exp_cfg.data[0].train_loader.args["prefetch_queue_depth"] = pipe_prefetch
+    exp_cfg.data[0].val_loader.args["prefetch_queue_depth"] = pipe_prefetch
+    exp_cfg.data[0].dataset.args["prefetch_queue_depth"] = source_prefetch
+    exp_cfg.data[0].dataset.args["prefetch_queue_depth"] = source_prefetch
+
+
 app = typer.Typer()
 
 
 @app.command()
 def main(
     workspace: Annotated[Path, typer.Option()],
-    epoch: Annotated[int, typer.Option()],
+    epoch: Annotated[Optional[int], typer.Option()] = None,
+    iteration: Annotated[Optional[int], typer.Option()] = None,
     remote: Annotated[Optional[Path], typer.Option()] = None,
     run_hash: Annotated[Optional[str], typer.Option()] = None,
     config_file: Annotated[Optional[Path], typer.Option()] = None,
     workers: Annotated[int, typer.Option()] = 4,
+    dali_py_workers: Annotated[int, typer.Option()] = 2,
+    dali_external_prefetch: Annotated[int, typer.Option()] = 2,
+    dali_pipe_prefetch: Annotated[int, typer.Option()] = 2,
     pbar: Annotated[bool, typer.Option()] = False,
     brief: Annotated[Optional[str], typer.Option()] = None,
 ):
@@ -98,6 +117,11 @@ def main(
     else:
         raise RuntimeError("Either config-file or run-hash should be set")
     exp_cfg.set_workers(workers)
+
+    if exp_cfg.data[0].train_loader.type == "DALI":
+        apply_dali_pipe_kwargs(
+            exp_cfg, dali_py_workers, dali_pipe_prefetch, dali_external_prefetch
+        )
 
     if remote is not None:
         with open(remote, "r", encoding="utf-8") as file:
@@ -143,7 +167,10 @@ def main(
         )
     trainer.min_index = data_cfg.properties.get("min_index", None)  # Set min index?
 
-    trainer.train(epoch=epoch)
+    trainer.train(epoch=epoch, iteration=iteration)
+    # from konductor.trainer.profiler import profile_function
+
+    # profile_function(trainer._train, Path.cwd())
 
 
 if __name__ == "__main__":

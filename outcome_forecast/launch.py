@@ -44,6 +44,7 @@ def main(
     template_name: Annotated[
         str, typer.Option(help="name of template to use")
     ] = "train.yml.j2",
+    apply: Annotated[bool, typer.Option(help="Apply manifest")] = True,
 ):
     """Launch kubernetes job with path to training configuration"""
 
@@ -93,7 +94,8 @@ def main(
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(kube_manifest)
 
-    subprocess.run(["kubectl", "apply", "-f", str(out_path)], check=True)
+    if apply:
+        subprocess.run(["kubectl", "apply", "-f", str(out_path)], check=True)
 
 
 if __name__ == "__main__":

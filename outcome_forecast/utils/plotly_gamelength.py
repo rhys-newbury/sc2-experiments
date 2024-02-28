@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import numpy as np
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import Input, Output, callback, dcc, html
@@ -9,34 +8,6 @@ from konductor.metadata.database.sqlite import SQLiteDB, DEFAULT_FILENAME
 from dash.dependencies import State
 import csv
 import io
-
-
-class TimePoint:
-    __slots__ = "value"
-
-    def __init__(self, value: float):
-        self.value = value
-
-    def as_db_key(self):
-        return "t_" + str(self.value).replace(".", "_")
-
-    def as_pq_key(self):
-        return "binary_acc_" + str(self.value)
-
-    def as_float(self):
-        return float(self.value)
-
-
-time_points = [TimePoint(t) for t in np.arange(2, 20, 0.5)]
-
-
-def get_labels():
-    return {str(t.as_float()): "FLOAT" for t in time_points}
-
-
-def pq_key_to_db_key(key: str):
-    return "t_" + key.split("_")[-1].replace(".", "_")
-
 
 layout = html.Div(
     children=[
@@ -61,25 +32,21 @@ def hash_to_brief(root: Path):
 
 @callback(
     Output("ts2-length-win", "figure"),
-    Input("ts2-eval_folder", "value"),
+    Input("ts2-eval-folder", "value"),
     Input("root-dir", "data"),
     prevent_initial_call=False,
 )
-def update_game_length(eval_folder: str, root: str):
-    if not all([root]):
-        raise PreventUpdate
+def update_game_length(eval_folder: str, root_: str):
+    if not root_:
+        raise PreventUpdate()
 
-    _root = Path(root)
+    root = Path(root_)
 
-    hb_map = hash_to_brief(_root)
+    hb_map = hash_to_brief(root)
     fig = go.Figure()
 
-    for folder in _root.glob("*"):
-        if not folder.is_dir():
-            continue
-
+    for folder in filter(lambda x: x.is_dir(), root.iterdir()):
         csv = folder / f"percent_{eval_folder}" / "game_length_results_50"
-
         if not csv.exists():
             continue
 
@@ -101,8 +68,8 @@ def update_game_length(eval_folder: str, root: str):
 
     # Update layout
     fig.update_layout(
-        title="Outcome forecast acc over Game Length",
-        xaxis_title="% Game Length",
+        title="Outcome forecast acc over Game Duration",
+        xaxis_title="% Game Duration",
         yaxis_title="Accuracy (%)",
         yaxis_range=[0, 1],
     )

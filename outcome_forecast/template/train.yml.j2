@@ -12,7 +12,7 @@ spec:
       name: train
       template:
         spec:
-          restartPolicy: OnFailure
+          restartPolicy: Never
           imagePullSecrets:
             - name: dkr-creds
           securityContext:

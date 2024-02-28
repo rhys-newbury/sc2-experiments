@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 
 import numpy as np
 import dash_bootstrap_components as dbc
@@ -9,10 +8,6 @@ from dash.exceptions import PreventUpdate
 from konductor.metadata.database.sqlite import SQLiteDB, DEFAULT_FILENAME
 from .xgboost_tourn import d as xgboost_tourn
 from .xgboost_492 import d as xgboost_492
-
-from typing import List
-
-_WAYPOINT_COL_RE = re.compile(r"\b[a-zA-Z]+_\d+\b")
 
 
 class TimePoint:
@@ -36,10 +31,6 @@ time_points = [TimePoint(t) for t in np.arange(2, 20, 0.5)]
 
 def get_labels():
     return {str(t.as_float()): "FLOAT" for t in time_points}
-
-
-def pq_key_to_db_key(key: str):
-    return "t_" + key.split("_")[-1].replace(".", "_")
 
 
 layout = html.Div(
@@ -73,7 +64,7 @@ def get_performance_data(root: Path, metric: str):
     return output
 
 
-def get_all_performance_data(root: Path, keys: List[str]):
+def get_all_performance_data(root: Path, keys: list[str]):
     db_handle = SQLiteDB(root / DEFAULT_FILENAME)
     output = (
         db_handle.cursor()
@@ -97,7 +88,7 @@ def hash_to_brief(root: Path):
     prevent_initial_call=True,
 )
 def update_col_graph(metric: str, root: str):
-    if not all([metric, root]):
+    if not all((metric, root)):
         raise PreventUpdate
 
     df = get_performance_data(Path(root), metric)
@@ -131,9 +122,8 @@ def update_col_graph(metric: str, root: str):
     prevent_initial_call=False,
 )
 def update_line_graph(root: str):
-    print(root)
-    if not all([root]):
-        raise PreventUpdate
+    if not root:
+        raise PreventUpdate()
 
     keys = [tp.as_db_key() for tp in time_points]
     df = get_all_performance_data(Path(root), keys)
@@ -163,7 +153,7 @@ def update_line_graph(root: str):
 
     # Update layout for better readability (optional)
     fig.update_layout(
-        title_text="Results over game length",
+        title_text="Results Over Game Time",
         xaxis_title="Time (minutes)",
         yaxis_title="Accuracy (%)",
     )

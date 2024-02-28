@@ -1,11 +1,12 @@
 import sqlite3
+from abc import ABC, abstractmethod
 from logging import getLogger
 from pathlib import Path
 from typing import Sequence
 
 import numpy as np
 import torch
-from nvidia.dali import types
+from nvidia.dali.types import BatchInfo, SampleInfo
 from torch import Tensor
 
 
@@ -16,7 +17,7 @@ def upper_bound(x: Tensor, value: float) -> int:
     return int(torch.argwhere(torch.le(x, value))[-1].item())
 
 
-def find_closest_indicies(options: Sequence[int], targets: Sequence[int]):
+def find_closest_indices(options: Sequence[int], targets: Sequence[int]):
     """
     Find the closest option corresponding to a target, if there is no match, place -1
     TODO Convert this to cpp
@@ -31,6 +32,7 @@ def find_closest_indicies(options: Sequence[int], targets: Sequence[int]):
             continue
         if prv <= targets[tgt_idx] <= nxt:
             nearest[tgt_idx] = idx
+            nearest[tgt_idx] += (targets[tgt_idx] - prv) > (nxt - targets[tgt_idx])
             tgt_idx += 1
             if tgt_idx == nearest.nelement():
                 break
@@ -55,7 +57,7 @@ def gen_val_query(database: Path, sql_filters: list[str] | None):
     return sql_query
 
 
-class BaseDALIDataset:
+class BaseDALIDataset(ABC):
     """External Iterator for DALI"""
 
     def __init__(
@@ -64,6 +66,8 @@ class BaseDALIDataset:
         shard_id: int,
         num_shards: int,
         random_shuffle: bool,
+        yields_batch: bool = False,
+        prefetch_queue_depth: int = 2,
     ) -> None:
         self.logger = getLogger(type(self).__name__)
         self.shard_id = shard_id
@@ -72,12 +76,15 @@ class BaseDALIDataset:
         self.random_shuffle = random_shuffle
         self.idx_samples: np.ndarray = np.zeros(0, dtype=np.int64)
         self.last_seen_epoch = -1
+        self.yields_batch = yields_batch
+        self.prefetch_queue_depth = prefetch_queue_depth
 
     def _initialize(self):
         self.idx_samples = np.arange(len(self), dtype=np.int64)
 
-    def __len__(self):
-        raise NotImplementedError
+    @abstractmethod
+    def __len__(self) -> int:
+        """Number of samples in dataset"""
 
     def __getstate__(self):
         return self.__dict__.copy()
@@ -88,23 +95,32 @@ class BaseDALIDataset:
 
     @property
     def num_iterations(self):
-        return len(self) // self.num_shards // self.batch_size
+        _num_iter = len(self) // self.num_shards
+        if not self.yields_batch:
+            _num_iter //= self.batch_size
+        return _num_iter
 
-    def resample_indicies(self, sample_info: types.SampleInfo):
-        self.last_seen_epoch = sample_info.epoch_idx
-        self.idx_samples = np.random.default_rng(
-            seed=42 + sample_info.epoch_idx
-        ).permutation(len(self))
+    def resample_indices(self, epoch_idx: int):
+        self.last_seen_epoch = epoch_idx
+        self.idx_samples = np.random.default_rng(seed=42 + epoch_idx).permutation(
+            len(self)
+        )
 
-    def __call__(self, sample_info: types.SampleInfo) -> int:
+    def __call__(self, yield_info: SampleInfo | BatchInfo) -> int:
         if len(self) == 0:
             self._initialize()
 
-        if sample_info.iteration >= self.num_iterations:
+        if yield_info.iteration >= self.num_iterations:
             raise StopIteration
 
-        if self.random_shuffle and sample_info.epoch_idx != self.last_seen_epoch:
-            self.resample_indicies(sample_info)
+        if self.random_shuffle and yield_info.epoch_idx != self.last_seen_epoch:
+            self.resample_indices(yield_info.epoch_idx)
 
-        idx = sample_info.idx_in_epoch + self.shard_id
+        idx = self.shard_id
+        idx += (
+            yield_info.idx_in_epoch
+            if isinstance(yield_info, SampleInfo)
+            else yield_info.iteration
+        )
+
         return self.idx_samples[idx].item()

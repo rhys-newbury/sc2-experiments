@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tool for gathering and formatting results"""
 import sqlite3
+import random
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -8,7 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 import typer
-from konductor.data import Split
+from konductor.data import Split, get_dataset_properties
 from konductor.metadata.database import Metadata
 from konductor.utilities.pbar import IntervalPbar
 
@@ -17,14 +18,16 @@ from konductor.metadata.loggers import ParquetLogger
 from konductor.utilities.metadata import update_database
 from konductor.utilities.pbar import LivePbar
 from pyarrow import parquet as pq
-from src.stats import BinaryAcc
-from torch import Tensor
-from utils.eval_helpers import (
+from src.eval_helpers import (
     get_dataloader_with_metadata,
+    metadata_to_str,
     setup_eval_model_and_dataloader,
     write_minimap_forecast_results,
-    metadata_to_str,
+    write_outcome_prediction,
 )
+from src.stats import BinaryAcc
+from src.utils import TimeRange
+from torch import Tensor
 
 app = typer.Typer()
 
@@ -111,7 +114,7 @@ def evaluate(
     meta = Metadata.from_yaml(run_path / "metadata.yaml")
 
     with IntervalPbar(
-        total=len(dataloader), fraction=0.1
+        total=len(dataloader), fraction=0.1, desc="Evaluating Model..."
     ) as pbar, torch.inference_mode():
         for sample in dataloader:
             if isinstance(sample, list):
@@ -152,7 +155,9 @@ def evaluate_percent(
     interval = 100 / num_buckets
 
     with IntervalPbar(
-        total=len(dataloader), fraction=0.1
+        total=len(dataloader),
+        fraction=0.1,
+        desc="Predicting Game Outcome By Duration...",
     ) as pbar, torch.inference_mode():
         for sample in dataloader:
             if isinstance(sample, list):
@@ -253,23 +258,96 @@ def visualise_minimap_forecast(
     batch_size: Annotated[int, typer.Option()] = 16,
     split: Annotated[Split, typer.Option()] = Split.VAL,
     n_samples: Annotated[int, typer.Option()] = 16,
+    n_time: Annotated[int, typer.Option()] = 6,
 ):
     """Write images or minimap forecast for konduct review image viewer."""
-    exp_config, model, _ = setup_eval_model_and_dataloader(
+    exp_config, model, dataloader = setup_eval_model_and_dataloader(
         run_path, split=split, workers=workers, batch_size=batch_size
     )
-    dataloader = get_dataloader_with_metadata(exp_config)
+
+    dataset_props = get_dataset_properties(exp_config)
+    timepoints = (
+        list(dataset_props["timepoints"].arange())
+        if "timepoints" in dataset_props
+        else None
+    )
+
+    random.seed(0)  # Fix random seed for time_idx sampling
 
     outdir = exp_config.exp_path / "images"
     outdir.mkdir(exist_ok=True)
-    with LivePbar(total=n_samples, desc="Generating Images") as pbar:
+    with LivePbar(total=n_samples, desc="Generating Minimap Predictions...") as pbar:
         for sample_ in dataloader:
             sample: dict[str, Tensor] = sample_[0]
             preds: Tensor = model(sample)
-            write_minimap_forecast_results(preds, sample, outdir)
+            write_minimap_forecast_results(preds, sample, outdir, timepoints, n_time)
             pbar.update(preds.shape[0])
             if pbar.n >= n_samples:
                 break
+
+    with open(outdir / "samples.txt", "r", encoding="utf-8") as f:
+        filenames = f.readlines()
+    filenames = sorted(set(filenames))
+    with open(outdir / "samples.txt", "w", encoding="utf-8") as f:
+        f.write("".join(filenames))
+
+
+@app.command()
+@torch.inference_mode()
+def single_replay_analysis(
+    run_path: Annotated[Path, typer.Option()],
+    workers: Annotated[int, typer.Option()] = 4,
+    batch_size: Annotated[int, typer.Option()] = 16,
+    split: Annotated[Split, typer.Option()] = Split.VAL,
+    n_samples: Annotated[int, typer.Option()] = 16,
+):
+    """Record and plot the single replay outcome prediction over the duration of the replay"""
+    exp_config, model, dataloader = setup_eval_model_and_dataloader(
+        run_path, split=split, workers=workers, batch_size=batch_size
+    )
+
+    dataset_props = get_dataset_properties(exp_config)
+    timepoints: TimeRange = dataset_props["timepoints"]
+
+    results = pd.DataFrame(
+        index=pd.RangeIndex(0, n_samples),
+        columns=["replay", "playerId", "outcome"]
+        + [str(t.item()) for t in timepoints.arange()],
+    )
+
+    with LivePbar(total=n_samples, desc="Predicting Replay Outcomes...") as pbar:
+        for sample_ in dataloader:
+            sample: dict[str, Tensor] = sample_[0]
+            preds: Tensor = model(sample)
+            write_outcome_prediction(sample, preds, pbar.n, results)
+            pbar.update(preds.shape[0])
+            if pbar.n >= n_samples:
+                break
+
+    results.to_csv(run_path / "outcome_prediction.csv")
+
+
+@app.command()
+def single_replay_analysis_all(
+    workspace: Annotated[Path, typer.Option()],
+    workers: Annotated[int, typer.Option()] = 4,
+    batch_size: Annotated[int, typer.Option()] = 16,
+    split: Annotated[Split, typer.Option()] = Split.VAL,
+    n_samples: Annotated[int, typer.Option()] = 16,
+):
+    """Run single-replay-analysis for all experiments in a workspace"""
+
+    def is_trained_experiment(path: Path):
+        """Must be trained experiment if checkpoint exists"""
+        return (path / "latest.pt").exists()
+
+    experiments = list(filter(is_trained_experiment, workspace.iterdir()))
+    for idx, item in enumerate(experiments, 1):
+        try:
+            single_replay_analysis(item, workers, batch_size, split, n_samples)
+        except RuntimeError as err:
+            print(f"Failed to run experiment {item.stem} with error: {err}")
+        print(f"Finised {idx} of {len(experiments)} experiments")
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ class MinimapBCE(nn.BCEWithLogitsLoss):
 
 @dataclass
 @REGISTRY.register_module("minimap-bce")
-class MinimapForecastBCE(LossConfig):
+class MinimapBCECfg(LossConfig):
     history_len: int
 
     @classmethod
@@ -118,15 +118,16 @@ class MinimapFocal(nn.BCEWithLogitsLoss):
         loss_mask = self._focal_loss(predictions, next_minimap)
         loss_sequence = loss_mask.mean(dim=(-1, -2, -3))
 
-        valid_seq = get_valid_sequence_mask(targets["valid"], self.history_len)
-        loss_sequence *= valid_seq
+        if "valid" in targets:
+            valid_seq = get_valid_sequence_mask(targets["valid"], self.history_len + 1)
+            loss_sequence *= valid_seq
 
         return {"minimap-focal": loss_sequence.mean()}
 
 
 @dataclass
 @REGISTRY.register_module("minimap-focal")
-class MinimapForecastBCE(LossConfig):
+class MinimapFocalCfg(LossConfig):
     history_len: int
     alpha: float = 0.75
     gamma: float = 0.2
@@ -139,4 +140,58 @@ class MinimapForecastBCE(LossConfig):
         return super().from_config(config, idx, **kwargs)
 
     def get_instance(self, *args, **kwargs):
-        return self.init_auto_filter(MinimapFocal, **self.__dict__)
+        return self.init_auto_filter(MinimapFocal)
+
+
+class MinimapFocalMotion(MinimapFocal):
+    def __init__(
+        self,
+        history_len: int,
+        motion_weight: float = 1.5,
+        alpha: float = 0.75,
+        gamma: float = 2,
+        pos_weight: float = 2,
+    ) -> None:
+        super().__init__(history_len, alpha, gamma, pos_weight)
+        self.motion_weight = motion_weight
+
+    @torch.no_grad()
+    def _calc_motion(self, prev: Tensor, nxt: Tensor) -> Tensor:
+        """Calculate pixel-wise motion mask with weighting factor to emphasise loss"""
+        mask = (prev != nxt).float() * self.motion_weight
+        return mask + 1
+
+    def forward(
+        self, predictions: Tensor, targets: dict[str, Tensor]
+    ) -> dict[str, Tensor]:
+        minimaps_player = targets["minimap_features"][:, :, [-4, -1]]
+        next_minimap = minimaps_player[:, self.history_len :]
+        loss_pixels = self._focal_loss(predictions, next_minimap)
+        prev_minimap = minimaps_player[:, self.history_len - 1 : -1]
+        loss_pixels = loss_pixels * self._calc_motion(prev_minimap, next_minimap)
+        loss_sequence = loss_pixels.mean(dim=(-1, -2, -3))
+
+        if "valid" in targets:
+            valid_seq = get_valid_sequence_mask(targets["valid"], self.history_len + 1)
+            loss_sequence *= valid_seq
+
+        return {"minimap-focal": loss_sequence.mean()}
+
+
+@dataclass
+@REGISTRY.register_module("minimap-focal-motion")
+class MinimapFocalMotionCfg(LossConfig):
+    history_len: int
+    alpha: float = 0.75
+    gamma: float = 0.2
+    pos_weight: float = 1.0
+    motion_weight: float = 1.5
+
+    @classmethod
+    def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
+        model_cfg = get_model_config(config=config)
+        config.criterion[idx].args["history_len"] = model_cfg.history_len
+        return super().from_config(config, idx, **kwargs)
+
+    def get_instance(self, *args, **kwargs):
+        return self.init_auto_filter(MinimapFocal)
