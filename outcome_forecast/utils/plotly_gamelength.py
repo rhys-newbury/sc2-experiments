@@ -6,6 +6,9 @@ import plotly.graph_objects as go
 from dash import Input, Output, callback, dcc, html
 from dash.exceptions import PreventUpdate
 from konductor.metadata.database.sqlite import SQLiteDB, DEFAULT_FILENAME
+from dash.dependencies import State
+import csv
+import io
 
 
 class TimePoint:
@@ -41,6 +44,8 @@ layout = html.Div(
             [
                 html.H3("Eval Accuracy Over % Game Length"),
                 dcc.Dropdown(id="ts2-eval_folder", options=["tournament", "492"]),
+                html.Button("Save", id="save-button"),
+                dcc.Download(id="download-csv"),
                 dcc.Graph(id="ts2-length-win", selectedData={}),
             ]
         ),
@@ -85,7 +90,7 @@ def update_game_length(eval_folder: str, root: str):
         totals = lines[1].split(",")
 
         percentage = [float(c) / float(t) for c, t in zip(counts[1:], totals[1:])]
-        times = list(range(0, 100, 2))
+        times = list(range(2, 100, 2))
 
         # Add a scatter plot
         fig.add_trace(
@@ -104,3 +109,38 @@ def update_game_length(eval_folder: str, root: str):
 
     # Show the plot
     return fig
+
+
+@callback(
+    Output("download-csv", "data"),
+    Input("save-button", "n_clicks"),
+    State("ts2-length-win", "figure"),
+    prevent_initial_call=True,
+)
+def save_graph_data_to_csv(n_clicks, figure):
+    if n_clicks:
+        buffer = io.StringIO()
+
+        writer = csv.writer(buffer)
+
+        if len(figure["data"]) == 0:
+            raise PreventUpdate
+
+        print(figure)
+
+        max_index = max(
+            [len(figure["data"][idx]["x"]) for idx in range(len(figure["data"]))]
+        )
+        for idx in range(-1, max_index):
+            row = []
+            for data in figure["data"]:
+                if idx == -1:
+                    row += [f"{data['name']}_x", f"{data['name']}_y"]
+                    continue
+                try:
+                    row += [data["x"][idx], data["y"][idx]]
+                except IndexError:
+                    row += [0, 0]
+            writer.writerow(row)
+
+    return dict(content=buffer.getvalue(), filename="graph_data.csv")
