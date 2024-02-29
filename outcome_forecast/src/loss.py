@@ -7,30 +7,24 @@ from konductor.init import ExperimentInitConfig
 from konductor.models import get_model_config
 from konductor.losses import LossConfig, REGISTRY
 from torch import nn, Tensor
+from torch.nn import functional as F
 
 from .utils import get_valid_sequence_mask
 
 
-class WinBCELogits(nn.BCEWithLogitsLoss):
-    def __init__(self) -> None:
-        super().__init__(reduction="none")
-
-    def forward(self, pred: Tensor, data: dict[str, Tensor]) -> dict[str, Tensor]:
-        loss = super().forward(pred, data["win"].unsqueeze(-1).repeat(1, pred.shape[1]))
-        loss *= data["valid"]
-        return {"win-bce": loss.mean()}
-
-
-class WinBCE(nn.BCELoss):
-    def __init__(self) -> None:
-        super().__init__(reduction="none")
-
-    def forward(self, pred: Tensor, data: dict[str, Tensor]) -> dict[str, Tensor]:
-        loss = super().forward(
-            pred.unsqueeze(-1),
-            data["win"].unsqueeze(-1).repeat(1, pred.shape[1]).unsqueeze(-1),
+class WinBCE(nn.Module):
+    def __init__(self, pred_is_logit: bool) -> None:
+        super().__init__()
+        self.loss_fn = (
+            F.binary_cross_entropy_with_logits
+            if pred_is_logit
+            else F.binary_cross_entropy
         )
-        loss *= data["valid"].unsqueeze(-1)
+
+    def forward(self, pred: Tensor, data: dict[str, Tensor]) -> dict[str, Tensor]:
+        win_repeat = data["win"].unsqueeze(-1).repeat(1, pred.shape[1])
+        loss = self.loss_fn(pred, win_repeat, reduction="none")
+        loss *= data["valid"]
         return {"win-bce": loss.mean()}
 
 
@@ -42,35 +36,80 @@ class WinBCECfg(LossConfig):
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
         model = get_model_config(config=config).get_instance()
-        if model.is_logit_output:
+        if model.is_logit_output:  # check Truth and None
             config.criterion[idx].args["model_output_logits"] = model.is_logit_output
         return super().from_config(config, idx, **kwargs)
 
     def get_instance(self, *args, **kwargs):
-        return WinBCELogits() if self.model_output_logits else WinBCE()
+        return WinBCE(self.model_output_logits)
 
 
-class MinimapBCE(nn.BCEWithLogitsLoss):
-    def __init__(self, history_len: int):
-        super().__init__(reduction="none")
+class MinimapLoss(nn.Module):
+    """
+    Base minimap loss that deals with masking and motion weighting, pixel-wise
+    loss must be defined and the name of loss assigned in the derived class
+    """
+
+    def __init__(self, history_len: int, motion_weight: float | None) -> None:
+        super().__init__()
         self.history_len = history_len
+        self.motion_weight = motion_weight
+        if self.motion_weight is not None:
+            assert self.motion_weight > 1, f"{motion_weight=}"
 
-    def forward(self, pred: Tensor, target: dict[str, Tensor]) -> dict[str, Tensor]:
-        """Only apply loss where all images in the sequence are valid"""
-        minimaps_player = target["minimap_features"][:, :, [-4, -1]]
+    @property
+    def _key(self) -> str:
+        """Name of the loss function"""
+        raise NotImplementedError()
+
+    def _loss_fn(self, preds: Tensor, target: Tensor) -> Tensor:
+        """Returns pixel-wise loss between preds and target"""
+        raise NotImplementedError()
+
+    def _get_motion_weight(self, prev: Tensor, nxt: Tensor) -> Tensor:
+        """Calculate pixel-wise motion weighting factor to emphasise loss"""
+        assert self.motion_weight is not None
+        mask = torch.ones_like(prev)
+        mask[prev != nxt] = self.motion_weight
+        return mask
+
+    def forward(
+        self, predictions: Tensor, targets: dict[str, Tensor]
+    ) -> dict[str, Tensor]:
+        minimaps_player = targets["minimap_features"][:, :, [-4, -1]]
         next_minimap = minimaps_player[:, self.history_len :]
-        loss = super().forward(pred, next_minimap).mean(dim=(-1, -2, -3))
+        loss_mask = self._loss_fn(predictions, next_minimap)
 
-        valid_seq = get_valid_sequence_mask(target["valid"], self.history_len)
-        loss *= valid_seq
+        if self.motion_weight is not None:
+            prev_minimap = minimaps_player[:, self.history_len - 1 : -1]
+            loss_mask *= self._get_motion_weight(prev_minimap, next_minimap)
 
-        return {"minimap-bce": loss.mean()}
+        loss_sequence = loss_mask.mean(dim=(-1, -2, -3))
+
+        if "valid" in targets:
+            valid_seq = get_valid_sequence_mask(targets["valid"], self.history_len + 1)
+            loss_sequence *= valid_seq
+
+        return {self._key: loss_sequence.mean()}
+
+
+class MinimapBCE(MinimapLoss):
+    def __init__(self, history_len: int, motion_weight: float | None = None):
+        super().__init__(history_len, motion_weight)
+
+    @property
+    def _key(self):
+        return "minimap-bce"
+
+    def _loss_fn(self, preds: Tensor, target: Tensor) -> Tensor:
+        return F.binary_cross_entropy_with_logits(preds, target, reduction="none")
 
 
 @dataclass
 @REGISTRY.register_module("minimap-bce")
 class MinimapBCECfg(LossConfig):
     history_len: int
+    motion_weight: float | None = None
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
@@ -79,50 +118,45 @@ class MinimapBCECfg(LossConfig):
         return super().from_config(config, idx, **kwargs)
 
     def get_instance(self, *args, **kwargs):
-        return MinimapBCE(self.history_len)
+        return self.init_auto_filter(MinimapBCE)
 
 
-class MinimapFocal(nn.BCEWithLogitsLoss):
+def focal_loss(pred: Tensor, target: Tensor, eps: float, gamma: float, alpha: float):
+    prob = pred.sigmoid()
+    bce_loss = F.binary_cross_entropy_with_logits(pred, target, reduction="none")
+    p_t = prob * target + (1 - prob) * (1 - target)
+    loss = bce_loss * ((1 - p_t + eps) ** gamma)
+
+    if alpha >= 0:
+        alpha_t = alpha * target + (1 - alpha) * (1 - target)
+        loss = alpha_t * loss
+
+    return loss
+
+
+focal_loss_jit: torch.ScriptFunction = torch.jit.script(focal_loss)
+
+
+class MinimapFocal(MinimapLoss):
     def __init__(
         self,
         history_len: int,
         alpha: float = 0.75,
         gamma: float = 2,
-        pos_weight: float = 2,
+        motion_weight: float | None = None,
     ) -> None:
-        pos_weight_tensor = torch.tensor(pos_weight)
-        if torch.cuda.is_available():
-            pos_weight_tensor.cuda()
-        super().__init__(reduction="none", pos_weight=pos_weight_tensor)
+        super().__init__(history_len, motion_weight)
         self.alpha = alpha
         self.gamma = gamma
-        self.history_len = history_len
 
-    def _focal_loss(self, pred: Tensor, target: Tensor):
-        prob = pred.sigmoid()
-        bce_loss = super().forward(pred, target)
-        p_t = prob * target + (1 - prob) * (1 - target)
-        loss = bce_loss * ((1 - p_t + torch.finfo(prob.dtype).eps) ** self.gamma)
+    @property
+    def _key(self):
+        return "minimap-focal"
 
-        if self.alpha >= 0:
-            alpha_t = self.alpha * target + (1 - self.alpha) * (1 - target)
-            loss = alpha_t * loss
-
-        return loss
-
-    def forward(
-        self, predictions: Tensor, targets: dict[str, Tensor]
-    ) -> dict[str, Tensor]:
-        minimaps_player = targets["minimap_features"][:, :, [-4, -1]]
-        next_minimap = minimaps_player[:, self.history_len :]
-        loss_mask = self._focal_loss(predictions, next_minimap)
-        loss_sequence = loss_mask.mean(dim=(-1, -2, -3))
-
-        if "valid" in targets:
-            valid_seq = get_valid_sequence_mask(targets["valid"], self.history_len + 1)
-            loss_sequence *= valid_seq
-
-        return {"minimap-focal": loss_sequence.mean()}
+    def _loss_fn(self, pred: Tensor, target: Tensor):
+        return focal_loss_jit(
+            pred, target, torch.finfo(pred.dtype).eps, self.gamma, self.alpha
+        )
 
 
 @dataclass
@@ -131,61 +165,7 @@ class MinimapFocalCfg(LossConfig):
     history_len: int
     alpha: float = 0.75
     gamma: float = 0.2
-    pos_weight: float = 1.0
-
-    @classmethod
-    def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
-        model_cfg = get_model_config(config=config)
-        config.criterion[idx].args["history_len"] = model_cfg.history_len
-        return super().from_config(config, idx, **kwargs)
-
-    def get_instance(self, *args, **kwargs):
-        return self.init_auto_filter(MinimapFocal)
-
-
-class MinimapFocalMotion(MinimapFocal):
-    def __init__(
-        self,
-        history_len: int,
-        motion_weight: float = 1.5,
-        alpha: float = 0.75,
-        gamma: float = 2,
-        pos_weight: float = 2,
-    ) -> None:
-        super().__init__(history_len, alpha, gamma, pos_weight)
-        self.motion_weight = motion_weight
-
-    @torch.no_grad()
-    def _calc_motion(self, prev: Tensor, nxt: Tensor) -> Tensor:
-        """Calculate pixel-wise motion mask with weighting factor to emphasise loss"""
-        mask = (prev != nxt).float() * self.motion_weight
-        return mask + 1
-
-    def forward(
-        self, predictions: Tensor, targets: dict[str, Tensor]
-    ) -> dict[str, Tensor]:
-        minimaps_player = targets["minimap_features"][:, :, [-4, -1]]
-        next_minimap = minimaps_player[:, self.history_len :]
-        loss_pixels = self._focal_loss(predictions, next_minimap)
-        prev_minimap = minimaps_player[:, self.history_len - 1 : -1]
-        loss_pixels = loss_pixels * self._calc_motion(prev_minimap, next_minimap)
-        loss_sequence = loss_pixels.mean(dim=(-1, -2, -3))
-
-        if "valid" in targets:
-            valid_seq = get_valid_sequence_mask(targets["valid"], self.history_len + 1)
-            loss_sequence *= valid_seq
-
-        return {"minimap-focal": loss_sequence.mean()}
-
-
-@dataclass
-@REGISTRY.register_module("minimap-focal-motion")
-class MinimapFocalMotionCfg(LossConfig):
-    history_len: int
-    alpha: float = 0.75
-    gamma: float = 0.2
-    pos_weight: float = 1.0
-    motion_weight: float = 1.5
+    motion_weight: float | None = None
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
