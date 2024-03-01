@@ -122,14 +122,13 @@ class MinimapBCECfg(LossConfig):
 
 
 def focal_loss(pred: Tensor, target: Tensor, eps: float, gamma: float, alpha: float):
-    prob = pred.sigmoid()
     bce_loss = F.binary_cross_entropy_with_logits(pred, target, reduction="none")
+    prob = pred.sigmoid()
     p_t = prob * target + (1 - prob) * (1 - target)
     loss = bce_loss * ((1 - p_t + eps) ** gamma)
 
-    if alpha >= 0:
-        alpha_t = alpha * target + (1 - alpha) * (1 - target)
-        loss = alpha_t * loss
+    if alpha > 0:
+        loss *= alpha * target + (1 - alpha) * (1 - target)
 
     return loss
 
