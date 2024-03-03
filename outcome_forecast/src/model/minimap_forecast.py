@@ -30,6 +30,17 @@ class MinimapTarget(enum.Enum):
             case MinimapTarget.BOTH:
                 return [-4, -1]
 
+    @staticmethod
+    def names(target: "MinimapTarget"):
+        """Index of target(s) in minimap feature layer stack"""
+        match target:
+            case MinimapTarget.SELF:
+                return ["self"]
+            case MinimapTarget.ENEMY:
+                return ["enemy"]
+            case MinimapTarget.BOTH:
+                return ["self", "enemy"]
+
 
 def _make_mlp(in_ch: int, hidden_ch: int, out_ch: int | None = None):
     """If out_ch is None default to in_ch"""

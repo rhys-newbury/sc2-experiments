@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 import typer
 from konductor.data import Split, get_dataset_properties
+from konductor.models import get_model_config
 from konductor.metadata.database import Metadata
 from konductor.utilities.pbar import IntervalPbar
 
@@ -18,6 +19,8 @@ from konductor.metadata.loggers import ParquetLogger
 from konductor.utilities.metadata import update_database
 from konductor.utilities.pbar import LivePbar
 from pyarrow import parquet as pq
+from torch import Tensor
+
 from src.eval_helpers import (
     get_dataloader_with_metadata,
     metadata_to_str,
@@ -25,9 +28,8 @@ from src.eval_helpers import (
     write_minimap_forecast_results,
     write_outcome_prediction,
 )
-from src.stats import BinaryAcc
+from src.stats import BinaryAcc, MinimapModelCfg
 from src.utils import TimeRange
-from torch import Tensor
 
 app = typer.Typer()
 
@@ -265,6 +267,8 @@ def visualise_minimap_forecast(
         run_path, split=split, workers=workers, batch_size=batch_size
     )
 
+    model_cfg: MinimapModelCfg = get_model_config(exp_config)
+
     dataset_props = get_dataset_properties(exp_config)
     timepoints = (
         list(dataset_props["timepoints"].arange())
@@ -280,7 +284,9 @@ def visualise_minimap_forecast(
         for sample_ in dataloader:
             sample: dict[str, Tensor] = sample_[0]
             preds: Tensor = model(sample)
-            write_minimap_forecast_results(preds, sample, outdir, timepoints, n_time)
+            write_minimap_forecast_results(
+                preds, sample, outdir, timepoints, n_time, model_cfg.target
+            )
             pbar.update(preds.shape[0])
             if pbar.n >= n_samples:
                 break

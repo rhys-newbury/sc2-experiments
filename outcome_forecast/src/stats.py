@@ -290,19 +290,13 @@ class MinimapSoftIoU(Statistic):
         )
 
     def get_keys(self) -> list[str]:
+        names = MinimapTarget.names(self.target)
         if self.timepoints is not None:
             return [
                 f"soft_iou_{t}_{p}"
-                for t, p in itertools.product(self.timepoints, self._target_keys())
+                for t, p in itertools.product(self.timepoints, names)
             ]
-        return [f"soft_iou_{p}" for p in self._target_keys()]
-
-    def _target_keys(self):
-        return (
-            ["self", "enemy"]
-            if self.target is MinimapTarget.BOTH
-            else [self.target.name.lower()]
-        )
+        return [f"soft_iou_{p}" for p in names]
 
     def __init__(
         self,
@@ -346,7 +340,7 @@ class MinimapSoftIoU(Statistic):
             if self.timepoints is not None:
                 prefix += f"_{self.timepoints[idx]}"
 
-            for idx, key in enumerate(self._target_keys()):
+            for idx, key in enumerate(MinimapTarget.names(self.target)):
                 results[f"{prefix}_{key}"] = soft_iou[:, idx]
 
         # TODO Mask out accuracy contrib of parts with invalid sequences
