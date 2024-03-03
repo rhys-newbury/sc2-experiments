@@ -1,3 +1,4 @@
+import enum
 import functools
 import operator
 from dataclasses import dataclass, field
@@ -11,6 +12,23 @@ from konductor.data import get_dataset_properties
 from konductor.init import ModuleInitConfig
 from konductor.models import MODEL_REGISTRY, ExperimentInitConfig
 from konductor.models._pytorch import TorchModelConfig
+
+
+class MinimapTarget(enum.Enum):
+    SELF = enum.auto()
+    ENEMY = enum.auto()
+    BOTH = enum.auto()
+
+    @staticmethod
+    def indicies(target: "MinimapTarget"):
+        """Index of target(s) in minimap feature layer stack"""
+        match target:
+            case MinimapTarget.SELF:
+                return [-4]
+            case MinimapTarget.ENEMY:
+                return [-1]
+            case MinimapTarget.BOTH:
+                return [-4, -1]
 
 
 def _make_mlp(in_ch: int, hidden_ch: int, out_ch: int | None = None):
@@ -54,6 +72,7 @@ class BaseConfig(TorchModelConfig):
     temporal: ModuleInitConfig
     decoder: ModuleInitConfig
     history_len: int = 8
+    target: MinimapTarget = MinimapTarget.BOTH
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0) -> Any:
@@ -69,6 +88,8 @@ class BaseConfig(TorchModelConfig):
             self.temporal = ModuleInitConfig(**self.temporal)
         if isinstance(self.decoder, dict):
             self.decoder = ModuleInitConfig(**self.decoder)
+        if isinstance(self.target, str):
+            self.target = MinimapTarget[self.target.upper()]
 
 
 @dataclass
@@ -87,6 +108,7 @@ class ConvV1Config(BaseConfig):
         temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
 
         self.decoder.args["in_ch"] = temporal.out_ch + encoder.out_ch[0]
+        self.decoder.args["out_ch"] = len(MinimapTarget.indicies(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
         return ConvForecaster(encoder, temporal, decoder, self.history_len)
 

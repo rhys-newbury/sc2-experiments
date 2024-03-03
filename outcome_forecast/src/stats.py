@@ -13,6 +13,8 @@ from konductor.models import get_model_config
 from konductor.init import ExperimentInitConfig
 from konductor.metadata.base_statistic import Statistic, STATISTICS_REGISTRY
 
+from .model.minimap_forecast import MinimapTarget, BaseConfig as MinimapModelCfg
+
 
 @dataclass
 class Confusion:
@@ -273,31 +275,45 @@ class WinAUC(Statistic):
 class MinimapSoftIoU(Statistic):
     @classmethod
     def from_config(cls, cfg: ExperimentInitConfig, **extras):
-        model_cfg = get_model_config(config=cfg)
+        model_cfg: MinimapModelCfg = get_model_config(config=cfg)
         data_cfg = get_dataset_properties(cfg)
         if "timepoints" in data_cfg:
             timepoints = data_cfg["timepoints"].arange()
         else:
             timepoints = None
         model_inst = model_cfg.get_instance()
-        return cls(model_cfg.history_len, timepoints, model_inst.is_logit_output)
+        return cls(
+            model_cfg.history_len,
+            model_cfg.target,
+            timepoints,
+            model_inst.is_logit_output,
+        )
 
     def get_keys(self) -> list[str]:
         if self.timepoints is not None:
             return [
                 f"soft_iou_{t}_{p}"
-                for t, p in itertools.product(self.timepoints, ["self", "enemy"])
+                for t, p in itertools.product(self.timepoints, self._target_keys())
             ]
-        return [f"soft_iou_{p}" for p in ["self", "enemy"]]
+        return [f"soft_iou_{p}" for p in self._target_keys()]
+
+    def _target_keys(self):
+        return (
+            ["self", "enemy"]
+            if self.target is MinimapTarget.BOTH
+            else [self.target.name.lower()]
+        )
 
     def __init__(
         self,
         sequence_len: int,
+        target: MinimapTarget,
         timepoints: Sequence[float] | None = None,
         should_sigmoid: bool = True,
         keep_batch: bool = False,
     ) -> None:
         super().__init__()
+        self.target = target
         self.sequence_len = sequence_len
         self.should_sigmoid = should_sigmoid
         self.timepoints = timepoints[sequence_len:] if timepoints is not None else None
@@ -314,8 +330,10 @@ class MinimapSoftIoU(Statistic):
     def __call__(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> Dict[str, float | Tensor]:
-        minimaps_player = targets["minimap_features"][:, :, [-4, -1]]
-        next_minimap = minimaps_player[:, self.sequence_len :]
+        target_minimaps = targets["minimap_features"][
+            :, :, MinimapTarget.indicies(self.target)
+        ]
+        next_minimap = target_minimaps[:, self.sequence_len :]
         if self.should_sigmoid:
             predictions = torch.sigmoid(predictions)
 
@@ -327,8 +345,9 @@ class MinimapSoftIoU(Statistic):
             prefix = "soft_iou"
             if self.timepoints is not None:
                 prefix += f"_{self.timepoints[idx]}"
-            results[f"{prefix}_self"] = soft_iou[:, 0]
-            results[f"{prefix}_enemy"] = soft_iou[:, 1]
+
+            for idx, key in enumerate(self._target_keys()):
+                results[f"{prefix}_{key}"] = soft_iou[:, idx]
 
         # TODO Mask out accuracy contrib of parts with invalid sequences
         # valid_mask = get_valid_sequence_mask(targets["valid"], self.sequence_len)

@@ -10,6 +10,7 @@ from torch import nn, Tensor
 from torch.nn import functional as F
 
 from .utils import get_valid_sequence_mask
+from .model.minimap_forecast import MinimapTarget, BaseConfig as MinimapModelCfg
 
 
 class WinBCE(nn.Module):
@@ -50,10 +51,13 @@ class MinimapLoss(nn.Module):
     loss must be defined and the name of loss assigned in the derived class
     """
 
-    def __init__(self, history_len: int, motion_weight: float | None) -> None:
+    def __init__(
+        self, history_len: int, motion_weight: float | None, target: MinimapTarget
+    ) -> None:
         super().__init__()
         self.history_len = history_len
         self.motion_weight = motion_weight
+        self.target = target
         if self.motion_weight is not None:
             assert self.motion_weight > 1, f"{motion_weight=}"
 
@@ -76,12 +80,14 @@ class MinimapLoss(nn.Module):
     def forward(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> dict[str, Tensor]:
-        minimaps_player = targets["minimap_features"][:, :, [-4, -1]]
-        next_minimap = minimaps_player[:, self.history_len :]
+        target_minimap = targets["minimap_features"][
+            :, :, MinimapTarget.indicies(self.target)
+        ]
+        next_minimap = target_minimap[:, self.history_len :]
         loss_mask = self._loss_fn(predictions, next_minimap)
 
         if self.motion_weight is not None:
-            prev_minimap = minimaps_player[:, self.history_len - 1 : -1]
+            prev_minimap = target_minimap[:, self.history_len - 1 : -1]
             loss_mask *= self._get_motion_weight(prev_minimap, next_minimap)
 
         loss_sequence = loss_mask.mean(dim=(-1, -2, -3))
@@ -93,10 +99,21 @@ class MinimapLoss(nn.Module):
         return {self._key: loss_sequence.mean()}
 
 
-class MinimapBCE(MinimapLoss):
-    def __init__(self, history_len: int, motion_weight: float | None = None):
-        super().__init__(history_len, motion_weight)
+@dataclass
+class MinimapCfg(LossConfig):
+    history_len: int
+    motion_weight: float | None = None
+    target: MinimapTarget = MinimapTarget.BOTH
 
+    @classmethod
+    def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
+        model_cfg: MinimapModelCfg = get_model_config(config=config)
+        config.criterion[idx].args["history_len"] = model_cfg.history_len
+        config.criterion[idx].args["target"] = model_cfg.target
+        return super().from_config(config, idx, **kwargs)
+
+
+class MinimapBCE(MinimapLoss):
     @property
     def _key(self):
         return "minimap-bce"
@@ -107,16 +124,7 @@ class MinimapBCE(MinimapLoss):
 
 @dataclass
 @REGISTRY.register_module("minimap-bce")
-class MinimapBCECfg(LossConfig):
-    history_len: int
-    motion_weight: float | None = None
-
-    @classmethod
-    def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
-        model_cfg = get_model_config(config=config)
-        config.criterion[idx].args["history_len"] = model_cfg.history_len
-        return super().from_config(config, idx, **kwargs)
-
+class MinimapBCECfg(MinimapCfg):
     def get_instance(self, *args, **kwargs):
         return self.init_auto_filter(MinimapBCE)
 
@@ -140,11 +148,12 @@ class MinimapFocal(MinimapLoss):
     def __init__(
         self,
         history_len: int,
-        alpha: float = 0.75,
-        gamma: float = 2,
-        motion_weight: float | None = None,
+        alpha: float,
+        gamma: float,
+        motion_weight: float | None,
+        target: MinimapTarget,
     ) -> None:
-        super().__init__(history_len, motion_weight)
+        super().__init__(history_len, motion_weight, target)
         self.alpha = alpha
         self.gamma = gamma
 
@@ -160,17 +169,9 @@ class MinimapFocal(MinimapLoss):
 
 @dataclass
 @REGISTRY.register_module("minimap-focal")
-class MinimapFocalCfg(LossConfig):
-    history_len: int
+class MinimapFocalCfg(MinimapCfg):
     alpha: float = 0.75
     gamma: float = 0.2
-    motion_weight: float | None = None
-
-    @classmethod
-    def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
-        model_cfg = get_model_config(config=config)
-        config.criterion[idx].args["history_len"] = model_cfg.history_len
-        return super().from_config(config, idx, **kwargs)
 
     def get_instance(self, *args, **kwargs):
         return self.init_auto_filter(MinimapFocal)
