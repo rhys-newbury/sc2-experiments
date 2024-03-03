@@ -5,7 +5,7 @@ dataset:
       end_min: 20
       step_sec: 3
       clip_len: 8
-      features: ["minimap_features"]
+      features: [minimap_features]
       yields_batch: true
       precalculated_clips: true
       sampler_cfg:
@@ -42,17 +42,17 @@ dataset:
             args:
               dst: [0, 3, 1, 2]
 criterion:
-  - type: minimap-focal-motion
+  - type: minimap-bce
     args:
-      gamma: 2
-      motion_weight: 3
+      motion_weight: 2
 model:
-  - type: conv-forecast-v1
+  - type: conv-forecast-v2
     args:
+      target: both
       encoder:
         type: image-fpn
         args:
-          output_lvl: 3
+          disable_fpn: true
           hidden_chs: [16, 32, 64, 96]
           strides: [1, 2, 2, 2]
           paddings: [1, 1, 1, 1]
@@ -64,25 +64,24 @@ model:
       decoder:
         type: aspp-decoder
         args:
-          out_ch: 2
           hidden_ch: 32
           rates: [3, 6, 9]
+      last_frame_encoder:
+        type: image-fpn
+        args:
+          disable_fpn: true
+          hidden_chs: [16, 32]
+          strides: [1, 2]
+          paddings: [1, 1]
     optimizer:
       type: adamw
       args:
-        step_interval: 1
-        lr: 1.e-5
+        lr: 1.e-3
         gradient_clipping: 0.01
       scheduler:
         type: poly
         args:
-          max_iter: 100
+          max_iter: 10
           power: 0.9
 logger:
   interval: 1000
-trainer:
-  validation_interval: 10000
-checkpointer:
-  mode: iteration
-  latest: 10000
-  extra: 50000
