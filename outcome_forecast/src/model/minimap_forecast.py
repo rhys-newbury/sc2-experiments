@@ -1,3 +1,4 @@
+import enum
 import functools
 import operator
 from dataclasses import dataclass, field
@@ -11,6 +12,34 @@ from konductor.data import get_dataset_properties
 from konductor.init import ModuleInitConfig
 from konductor.models import MODEL_REGISTRY, ExperimentInitConfig
 from konductor.models._pytorch import TorchModelConfig
+
+
+class MinimapTarget(enum.Enum):
+    SELF = enum.auto()
+    ENEMY = enum.auto()
+    BOTH = enum.auto()
+
+    @staticmethod
+    def indicies(target: "MinimapTarget"):
+        """Index of target(s) in minimap feature layer stack"""
+        match target:
+            case MinimapTarget.SELF:
+                return [-4]
+            case MinimapTarget.ENEMY:
+                return [-1]
+            case MinimapTarget.BOTH:
+                return [-4, -1]
+
+    @staticmethod
+    def names(target: "MinimapTarget"):
+        """Index of target(s) in minimap feature layer stack"""
+        match target:
+            case MinimapTarget.SELF:
+                return ["self"]
+            case MinimapTarget.ENEMY:
+                return ["enemy"]
+            case MinimapTarget.BOTH:
+                return ["self", "enemy"]
 
 
 def _make_mlp(in_ch: int, hidden_ch: int, out_ch: int | None = None):
@@ -54,6 +83,7 @@ class BaseConfig(TorchModelConfig):
     temporal: ModuleInitConfig
     decoder: ModuleInitConfig
     history_len: int = 8
+    target: MinimapTarget = MinimapTarget.BOTH
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0) -> Any:
@@ -69,6 +99,8 @@ class BaseConfig(TorchModelConfig):
             self.temporal = ModuleInitConfig(**self.temporal)
         if isinstance(self.decoder, dict):
             self.decoder = ModuleInitConfig(**self.decoder)
+        if isinstance(self.target, str):
+            self.target = MinimapTarget[self.target.upper()]
 
 
 @dataclass
@@ -87,6 +119,7 @@ class ConvV1Config(BaseConfig):
         temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
 
         self.decoder.args["in_ch"] = temporal.out_ch + encoder.out_ch[0]
+        self.decoder.args["out_ch"] = len(MinimapTarget.indicies(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
         return ConvForecaster(encoder, temporal, decoder, self.history_len)
 
@@ -130,6 +163,97 @@ class ConvForecaster(nn.Module):
             align_corners=True,
         )
         cat_features = torch.cat([temporal_feats, last_minimap_high], dim=1)
+        decoded = self.decoder(cat_features)
+        return decoded
+
+    def forward(self, inputs: dict[str, Tensor]) -> Tensor:
+        """"""
+        minimaps = inputs["minimap_features"]
+        ntime = minimaps.shape[1]
+        preds: list[Tensor] = []
+        for start_idx in range(ntime - self.history_len):
+            end_idx = start_idx + self.history_len
+            pred = self.forward_sequence(minimaps[:, start_idx:end_idx])
+            pred = F.interpolate(
+                pred, mode="bilinear", size=minimaps.shape[-2:], align_corners=True
+            )
+            preds.append(pred)
+
+        out = torch.stack(preds, dim=1)
+        return out
+
+
+@dataclass
+@MODEL_REGISTRY.register_module("conv-forecast-v2")
+class ConvV2Config(BaseConfig):
+    last_frame_encoder: ModuleInitConfig = field(kw_only=True)
+
+    def __post_init__(self):
+        super().__post_init__()
+        assert self.history_len % 2 == 0, "history_len must be even"
+        self.temporal.args["n_timesteps"] = self.history_len
+        if isinstance(self.last_frame_encoder, dict):
+            self.last_frame_encoder = ModuleInitConfig(**self.last_frame_encoder)
+
+    def get_instance(self, *args, **kwargs) -> Any:
+        """Construct modules and return conv forecaster"""
+        encoder = MODEL_REGISTRY[self.encoder.type](**self.encoder.args)
+
+        self.temporal.args["in_ch"] = encoder.out_ch
+        temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
+
+        self.last_frame_encoder.args["in_ch"] = self.encoder.args["in_ch"]
+        last_frame_encoder = MODEL_REGISTRY[self.last_frame_encoder.type](
+            **self.last_frame_encoder.args
+        )
+
+        self.decoder.args["in_ch"] = temporal.out_ch + last_frame_encoder.out_ch
+        self.decoder.args["out_ch"] = len(MinimapTarget.indicies(self.target))
+        decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
+
+        return ConvForecasterV2(
+            encoder, temporal, decoder, last_frame_encoder, self.history_len
+        )
+
+
+class ConvForecasterV2(nn.Module):
+    """
+    V2 uses another feature extractor for high resolution last frame
+    features as to not add confounding factor to temporal feature inputs.
+    """
+
+    is_logit_output = True
+
+    def __init__(
+        self,
+        encoder: nn.Module,
+        temporal: nn.Module,
+        decoder: nn.Module,
+        last_frame_encoder: nn.Module,
+        history_len: int,
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.temporal_conv = temporal
+        self.decoder = decoder
+        self.last_frame_encoder = last_frame_encoder
+        self.history_len = history_len
+
+    def forward_sequence(self, inputs: Tensor) -> Tensor:
+        # Squeeze and unsqueeze time dimension for siamese encoder
+        img_feats: Tensor = self.encoder(inputs.reshape(-1, *inputs.shape[2:]))
+        img_feats = img_feats.reshape(*inputs.shape[:2], *img_feats.shape[1:])
+        img_feats = img_feats.permute(0, 2, 1, 3, 4)  # [B,T,C,H,W] -> [B,C,T,H,W]
+
+        last_feats: Tensor = self.last_frame_encoder(inputs[:, -1])
+        temporal_feats: Tensor = self.temporal_conv(img_feats)
+        temporal_feats = F.interpolate(
+            temporal_feats.squeeze(2),
+            size=last_feats.shape[-2:],
+            mode="bilinear",
+            align_corners=True,
+        )
+        cat_features = torch.cat([temporal_feats, last_feats], dim=1)
         decoded = self.decoder(cat_features)
         return decoded
 

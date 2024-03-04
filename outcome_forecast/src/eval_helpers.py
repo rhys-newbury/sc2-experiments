@@ -12,7 +12,9 @@ from torch.nn import functional as F
 from konductor.data import Split, get_dataset_config
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model
+
 from .utils import get_valid_sequence_mask
+from .model.minimap_forecast import MinimapTarget
 
 
 def metadata_to_str(metadata: Tensor) -> list[str]:
@@ -94,12 +96,14 @@ def create_score_frame(pred: Tensor, target: Tensor) -> Tensor:
     return bgr_frame
 
 
-def write_minimaps(pred: Tensor, target: Tensor, folder: Path, prefix: str):
+def write_minimaps(
+    pred: Tensor, target: Tensor, folder: Path, prefix: str, out_type: MinimapTarget
+):
     """Write visualization results to disk"""
     predFolder = folder / "pred"
     dataFolder = folder / "data"
 
-    for idx, name in enumerate(["self", "enemy"]):
+    for idx, name in enumerate(MinimapTarget.names(out_type)):
         cv2.imwrite(
             str(predFolder / f"{prefix}_{name}.png"),
             (255 * (1 - pred[idx])).to(torch.uint8).cpu().numpy(),
@@ -178,6 +182,7 @@ def write_minimap_forecast_results(
     outdir: Path,
     timepoints: list[float] | None,
     n_time: int,
+    out_type: MinimapTarget,
 ):
     """
     Write minimap forecast predictions for konduct review image viewer.
@@ -216,7 +221,11 @@ def write_minimap_forecast_results(
                 prefix_ += f"_{timepoints[idx]}"
 
             write_minimaps(
-                pred_sig[bidx, idx - sequence_len], targets[bidx, idx], outdir, prefix
+                pred_sig[bidx, idx - sequence_len],
+                targets[bidx, idx],
+                outdir,
+                prefix,
+                out_type,
             )
             write_gradient_sequence(
                 targets[bidx], idx, sequence_len + 1, outdir, prefix
