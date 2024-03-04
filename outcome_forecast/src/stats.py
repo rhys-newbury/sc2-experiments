@@ -293,13 +293,15 @@ class MinimapSoftIoU(Statistic):
         )
 
     def get_keys(self) -> list[str]:
+        keys = ["motion_soft_iou", "soft_iou"]
+
         names = MinimapTarget.names(self.target)
+        keys = [f"{p}_{n}" for p, n in itertools.product(keys, names)]
+
         if self.timepoints is not None:
-            return [
-                f"soft_iou_{t}_{p}"
-                for t, p in itertools.product(self.timepoints, names)
-            ]
-        return [f"soft_iou_{p}" for p in names]
+            keys = [f"{p}_{n}" for p, n in itertools.product(keys, self.timepoints)]
+
+        return keys
 
     def __init__(
         self,
@@ -317,10 +319,14 @@ class MinimapSoftIoU(Statistic):
         self.keep_batch = keep_batch
 
     @staticmethod
-    def calculate_soft_iou(pred: Tensor, target: Tensor) -> Tensor:
+    def calculate_soft_iou(
+        pred: Tensor, target: Tensor, mask: Tensor | None = None
+    ) -> Tensor:
         """Calculates iou for binary mask over hw axis"""
-        soft_intersection = (pred * target).sum(dim=(-1, -2))
-        soft_union = (pred + target - pred * target).sum(dim=(-1, -2))
+        if mask is None:
+            mask = torch.ones_like(pred)
+        soft_intersection = (pred * target * mask).sum(dim=(-1, -2))
+        soft_union = ((pred + target - pred * target) * mask).sum(dim=(-1, -2))
         soft_iou = soft_intersection / soft_union
         return soft_iou
 
@@ -331,20 +337,29 @@ class MinimapSoftIoU(Statistic):
             :, :, MinimapTarget.indices(self.target)
         ]
         next_minimap = target_minimaps[:, self.sequence_len :]
+        static_unit_mask = (
+            torch.sum(target_minimaps, dim=1, keepdim=True) != target_minimaps.shape[1]
+        )
+
         if self.should_sigmoid:
             predictions = torch.sigmoid(predictions)
 
         results: dict[str, float | Tensor] = {}
-        for idx in range(next_minimap.shape[1]):
+        for t_idx in range(next_minimap.shape[1]):
             soft_iou = MinimapSoftIoU.calculate_soft_iou(
-                predictions[:, idx], next_minimap[:, idx]
+                predictions[:, t_idx], next_minimap[:, t_idx]
             )
-            prefix = "soft_iou"
-            if self.timepoints is not None:
-                prefix += f"_{self.timepoints[idx]}"
 
-            for idx, key in enumerate(MinimapTarget.names(self.target)):
-                results[f"{prefix}_{key}"] = soft_iou[:, idx]
+            motion_soft_iou = MinimapSoftIoU.calculate_soft_iou(
+                predictions[:, t_idx],
+                next_minimap[:, t_idx],
+                static_unit_mask[:, t_idx],
+            )
+
+            postfix = "" if self.timepoints is None else f"_{self.timepoints[t_idx]}"
+            for ch_idx, name in enumerate(MinimapTarget.names(self.target)):
+                results[f"soft_iou_{name}{postfix}"] = soft_iou[:, ch_idx]
+                results[f"motion_soft_iou_{name}{postfix}"] = motion_soft_iou[:, ch_idx]
 
         # TODO Mask out accuracy contrib of parts with invalid sequences
         # valid_mask = get_valid_sequence_mask(targets["valid"], self.sequence_len)
