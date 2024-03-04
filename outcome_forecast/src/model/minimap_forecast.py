@@ -20,7 +20,7 @@ class MinimapTarget(enum.Enum):
     BOTH = enum.auto()
 
     @staticmethod
-    def indicies(target: "MinimapTarget"):
+    def indices(target: "MinimapTarget"):
         """Index of target(s) in minimap feature layer stack"""
         match target:
             case MinimapTarget.SELF:
@@ -119,7 +119,7 @@ class ConvV1Config(BaseConfig):
         temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
 
         self.decoder.args["in_ch"] = temporal.out_ch + encoder.out_ch[0]
-        self.decoder.args["out_ch"] = len(MinimapTarget.indicies(self.target))
+        self.decoder.args["out_ch"] = len(MinimapTarget.indices(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
         return ConvForecaster(encoder, temporal, decoder, self.history_len)
 
@@ -208,7 +208,7 @@ class ConvV2Config(BaseConfig):
         )
 
         self.decoder.args["in_ch"] = temporal.out_ch + last_frame_encoder.out_ch
-        self.decoder.args["out_ch"] = len(MinimapTarget.indicies(self.target))
+        self.decoder.args["out_ch"] = len(MinimapTarget.indices(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
 
         return ConvForecasterV2(

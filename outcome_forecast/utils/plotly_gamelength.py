@@ -14,7 +14,7 @@ layout = html.Div(
         dbc.Row(
             [
                 html.H3("Eval Accuracy Over % Game Length"),
-                dcc.Dropdown(id="ts2-eval_folder", options=["tournament", "492"]),
+                dcc.Dropdown(id="ts2-eval-folder", options=["tournament", "492"]),
                 html.Button("Save", id="save-button"),
                 dcc.Download(id="download-csv"),
                 dcc.Graph(id="ts2-length-win", selectedData={}),
@@ -37,6 +37,7 @@ def hash_to_brief(root: Path):
     prevent_initial_call=False,
 )
 def update_game_length(eval_folder: str, root_: str):
+    print("hello...")
     if not root_:
         raise PreventUpdate()
 
@@ -44,9 +45,12 @@ def update_game_length(eval_folder: str, root_: str):
 
     hb_map = hash_to_brief(root)
     fig = go.Figure()
+    print(hb_map)
 
     for folder in filter(lambda x: x.is_dir(), root.iterdir()):
+        print(folder)
         csv = folder / f"percent_{eval_folder}" / "game_length_results_50"
+        print(csv)
         if not csv.exists():
             continue
 

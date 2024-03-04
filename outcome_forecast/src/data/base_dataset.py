@@ -355,6 +355,8 @@ class DaliFolderDataset(BaseDALIDataset):
         random_shuffle: bool,
         yields_batch: bool = False,
         prefetch_queue_depth: int = 2,
+        file_suffix: str = "",
+        load_other_player: bool = False,
     ) -> None:
         super().__init__(
             batch_size,
@@ -367,6 +369,8 @@ class DaliFolderDataset(BaseDALIDataset):
         self.split = split
         self.keys = keys
         self.folder = path / split.name.lower()
+        self.file_suffix = file_suffix
+        self.load_other_player = load_other_player
 
         if not self.folder.exists():
             raise FileNotFoundError(self.folder)
@@ -374,7 +378,9 @@ class DaliFolderDataset(BaseDALIDataset):
         self.files: list[str] = []
 
     def _initialize(self):
-        file_list = self.folder.parent / f"{self.split.lower()}-list.txt"
+        file_list = (
+            self.folder.parent / f"{self.split.lower()}-list{self.file_suffix}.txt"
+        )
         with open(file_list, "r", encoding="utf-8") as f:
             self.files = [s.strip() for s in f.readlines()]
         return super()._initialize()
@@ -386,6 +392,12 @@ class DaliFolderDataset(BaseDALIDataset):
         sample_idx = super().__call__(sample_info)
 
         data = np.load(self.folder / self.files[sample_idx], allow_pickle=True)
+        if self.load_other_player:
+            base_name = self.files[sample_idx][:-5]
+            alt_idx = int(self.files[sample_idx][-5]) % 2 + 1
+            other_data = np.load(
+                self.folder / f"{base_name}{alt_idx}.npz", allow_pickle=True
+            )
 
         try:
             out_data = tuple(
@@ -398,6 +410,18 @@ class DaliFolderDataset(BaseDALIDataset):
                 )
                 for k in self.keys
             )
+            if self.load_other_player:
+                x = []
+                for d, k in zip(out_data, self.keys):
+                    if k == "win":
+                        x.append(np.array(d == np.zeros_like(d), dtype=d.dtype))
+                    elif d.dtype == bool:
+                        x.append(np.logical_and(other_data[k], d))
+                    elif k == "metadata":
+                        x.append(d)
+                    else:
+                        x.append(np.concatenate((d, other_data[k]), axis=1))
+                out_data = tuple(x)
         except BadZipFile as e:
             raise RuntimeError(f"Got bad data from {self.files[sample_idx]}") from e
 
@@ -412,6 +436,8 @@ class DaliFolderDatasetConfig(FolderDatasetConfig):
     keys: list[str]  # List of items to read
     fp16_out: bool = False
     prefetch_queue_depth: int = 4
+    file_suffix: str = ""
+    load_other_player: bool = False
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0):

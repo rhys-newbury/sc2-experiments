@@ -40,7 +40,8 @@ def get_dataloader_with_metadata(
     """Get dataloader that also returns metadata (unique id associated with sample)"""
     dataset_cfg = get_dataset_config(exp_config)
     if hasattr(dataset_cfg, "keys"):
-        dataset_cfg.keys.append("metadata")
+        if "metadata" not in dataset_cfg.keys:
+            dataset_cfg.keys.append("metadata")
     else:
         dataset_cfg.metadata = True  # Need to add metadata list of keys to yield
     return dataset_cfg.get_dataloader(split)

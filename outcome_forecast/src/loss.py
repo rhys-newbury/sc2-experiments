@@ -81,7 +81,7 @@ class MinimapLoss(nn.Module):
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> dict[str, Tensor]:
         target_minimap = targets["minimap_features"][
-            :, :, MinimapTarget.indicies(self.target)
+            :, :, MinimapTarget.indices(self.target)
         ]
         next_minimap = target_minimap[:, self.history_len :]
         loss_mask = self._loss_fn(predictions, next_minimap)

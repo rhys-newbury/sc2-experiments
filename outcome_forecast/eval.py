@@ -249,7 +249,11 @@ def evaluate_all_percent(
 
     for run in filter(is_valid_run, workspace.iterdir()):
         print(f"Doing {run}")
-        evaluate_percent(run, outdir, database, num_buckets, batch_size, workers)
+        try:
+            evaluate_percent(run, outdir, database, num_buckets, batch_size, workers)
+        except Exception as e:
+            print(e)
+            print(f"failed for {run}")
 
 
 @app.command()
@@ -353,7 +357,7 @@ def single_replay_analysis_all(
             single_replay_analysis(item, workers, batch_size, split, n_samples)
         except RuntimeError as err:
             print(f"Failed to run experiment {item.stem} with error: {err}")
-        print(f"Finised {idx} of {len(experiments)} experiments")
+        print(f"Finished {idx} of {len(experiments)} experiments")
 
 
 if __name__ == "__main__":

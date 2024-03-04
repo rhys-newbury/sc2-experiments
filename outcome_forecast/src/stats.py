@@ -75,7 +75,7 @@ class BinaryAcc(Statistic):
 
     def __call__(
         self, predictions: Tensor, targets: dict[str, Tensor]
-    ) -> dict[str, float]:
+    ) -> dict[str, float | Tensor]:
         """Calculate Binary accuracy of the win prediction closest to the
            previously specified timepoints
 
@@ -89,7 +89,7 @@ class BinaryAcc(Statistic):
         """
         pred = torch.sigmoid(predictions) if self.should_sigmoid else predictions
 
-        result: dict[str, float] = {}
+        result: dict[str, float | Tensor] = {}
         for idx, key in enumerate(self.get_keys()):
             res = self.calculate_binary_accuracy(
                 pred[:, idx], targets["win"], targets["valid"][:, idx], self.keep_batch
@@ -98,9 +98,30 @@ class BinaryAcc(Statistic):
         return result
 
     @staticmethod
+    def _calculate_binary_accuracy_batch(
+        predictions: Tensor, targets: Tensor, valid_mask: Tensor
+    ) -> Tensor:
+        valid_predictions = predictions > 0.5
+        valid_targets = targets.bool()
+        correct_predictions = valid_predictions == valid_targets
+
+        total_valid_samples = valid_predictions.sum().item()
+
+        if total_valid_samples > 0:
+            accuracy = correct_predictions
+        else:
+            accuracy = torch.zeros(
+                correct_predictions.shape,
+                dtype=torch.bool,
+                device=predictions.device,
+            )
+
+        return accuracy
+
+    @staticmethod
     def calculate_binary_accuracy(
         predictions: Tensor, targets: Tensor, valid_mask: Tensor, keep_batch: bool
-    ) -> float:
+    ) -> float | Tensor:
         """Calculate binary accuracy considering the valid mask
 
         Args:
@@ -111,39 +132,21 @@ class BinaryAcc(Statistic):
         Returns:
             float: Binary accuracy
         """
+        if keep_batch:
+            return BinaryAcc._calculate_binary_accuracy_batch(
+                predictions, targets, valid_mask
+            )
 
-        if predictions.dim() == 1:
-            valid_predictions = predictions > 0.5
-            valid_targets = targets.bool()
-            correct_predictions = valid_predictions == valid_targets
+        valid_predictions = predictions[valid_mask] > 0.5
+        valid_targets = targets[valid_mask].bool()
 
-        else:
-            valid_predictions = predictions[valid_mask] > 0.5
-            valid_targets = targets[valid_mask].bool()
-            dim = tuple(range(int(keep_batch), valid_predictions.dim()))
-            correct_predictions = (valid_predictions == valid_targets).sum(dim)
-
+        correct_predictions = (valid_predictions == valid_targets).sum().item()
         total_valid_samples = valid_mask.sum().item()
 
-        if not keep_batch:
-            correct_predictions = correct_predictions.item()
-
         if total_valid_samples > 0:
-            if keep_batch:
-                accuracy = correct_predictions
-            else:
-                accuracy = correct_predictions / total_valid_samples
+            return correct_predictions / total_valid_samples
         else:
-            if keep_batch:
-                accuracy = torch.zeros(
-                    correct_predictions.shape,
-                    dtype=torch.bool,
-                    device=predictions.device,
-                )
-            else:
-                accuracy = 0.0  # Handle the case when there are no valid samples
-
-        return accuracy
+            return 0.0  # Handle the case when there are no valid samples
 
 
 @STATISTICS_REGISTRY.register_module("win-auc")
@@ -325,7 +328,7 @@ class MinimapSoftIoU(Statistic):
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> Dict[str, float | Tensor]:
         target_minimaps = targets["minimap_features"][
-            :, :, MinimapTarget.indicies(self.target)
+            :, :, MinimapTarget.indices(self.target)
         ]
         next_minimap = target_minimaps[:, self.sequence_len :]
         if self.should_sigmoid:

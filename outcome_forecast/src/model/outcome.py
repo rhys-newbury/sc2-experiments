@@ -24,10 +24,12 @@ class BaseConfig(TorchModelConfig):
         model_cfg = config.model[idx].args
 
         if image_enc := model_cfg.get("image_enc", None):
-            image_enc["args"]["in_ch"] = props["image_ch"]
+            if "in_ch" not in image_enc["args"]:
+                image_enc["args"]["in_ch"] = props["image_ch"]
 
         if scalar_enc := model_cfg.get("scalar_enc", None):
-            scalar_enc["args"]["in_ch"] = props["scalar_ch"]
+            if "in_ch" not in scalar_enc["args"]:
+                scalar_enc["args"]["in_ch"] = props["scalar_ch"]
             if scalar_enc["type"] == "scalar-v2":
                 scalar_enc["args"]["timerange"] = props["timepoints"]
 
