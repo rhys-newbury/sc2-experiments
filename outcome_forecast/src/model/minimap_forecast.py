@@ -56,6 +56,8 @@ def _make_mlp(in_ch: int, hidden_ch: int, out_ch: int | None = None):
 
 @MODEL_REGISTRY.register_module("temporal-conv")
 class TemporalConv(nn.Sequential):
+    """Steps temporal dimension in half and then to one"""
+
     def __init__(
         self,
         in_ch: int,
@@ -67,6 +69,37 @@ class TemporalConv(nn.Sequential):
         super().__init__(
             nn.Conv3d(
                 in_ch, hidden_ch, (n_timesteps // 2 + 1, 3, 3), padding=(0, 1, 1)
+            ),
+            nn.BatchNorm3d(hidden_ch),
+            activation(),
+            nn.Conv3d(hidden_ch, out_ch, (n_timesteps // 2, 3, 3), padding=(0, 1, 1)),
+            nn.BatchNorm3d(out_ch),
+            activation(),
+        )
+        self.out_ch = out_ch
+
+
+@MODEL_REGISTRY.register_module("temporal-conv-v2")
+class TemporalConv2(nn.Sequential):
+    """Convolve over adjacent frames twice before temporally downsampling"""
+
+    def __init__(
+        self,
+        in_ch: int,
+        hidden_ch: int,
+        out_ch: int,
+        n_timesteps: int,
+        activation: type[nn.Module] = nn.ReLU,
+    ) -> None:
+        super().__init__(
+            nn.Conv3d(in_ch, hidden_ch, (3, 3, 3), padding=(1, 1, 1)),
+            nn.BatchNorm3d(hidden_ch),
+            activation(),
+            nn.Conv3d(hidden_ch, hidden_ch, (3, 3, 3), padding=(1, 1, 1)),
+            nn.BatchNorm3d(hidden_ch),
+            activation(),
+            nn.Conv3d(
+                hidden_ch, hidden_ch, (n_timesteps // 2 + 1, 3, 3), padding=(0, 1, 1)
             ),
             nn.BatchNorm3d(hidden_ch),
             activation(),
