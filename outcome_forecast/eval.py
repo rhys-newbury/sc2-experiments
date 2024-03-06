@@ -264,7 +264,6 @@ def visualise_minimap_forecast(
     batch_size: Annotated[int, typer.Option()] = 16,
     split: Annotated[Split, typer.Option()] = Split.VAL,
     n_samples: Annotated[int, typer.Option()] = 16,
-    n_time: Annotated[int, typer.Option()] = 6,
 ):
     """Write images or minimap forecast for konduct review image viewer."""
     exp_config, model, dataloader = setup_eval_model_and_dataloader(
@@ -273,12 +272,11 @@ def visualise_minimap_forecast(
 
     model_cfg: MinimapModelCfg = get_model_config(exp_config)
 
-    dataset_props = get_dataset_properties(exp_config)
-    timepoints = (
-        list(dataset_props["timepoints"].arange())
-        if "timepoints" in dataset_props
-        else None
-    )
+    if model_cfg.future_len > 1:
+        step_sec = get_dataset_properties(exp_config)["step_sec"]
+        timepoints = [float(i * step_sec) for i in range(1, model_cfg.future_len + 1)]
+    else:
+        timepoints = None
 
     random.seed(0)  # Fix random seed for time_idx sampling
 
@@ -289,7 +287,7 @@ def visualise_minimap_forecast(
             sample: dict[str, Tensor] = sample_[0]
             preds: Tensor = model(sample)
             write_minimap_forecast_results(
-                preds, sample, outdir, timepoints, n_time, model_cfg.target
+                preds, sample, outdir, timepoints, model_cfg.target
             )
             pbar.update(preds.shape[0])
             if pbar.n >= n_samples:
