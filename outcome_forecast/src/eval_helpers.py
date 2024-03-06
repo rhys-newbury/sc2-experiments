@@ -182,7 +182,6 @@ def write_minimap_forecast_results(
     data: dict[str, Tensor],
     outdir: Path,
     timepoints: list[float] | None,
-    n_time: int,
     out_type: MinimapTarget,
 ):
     """
@@ -201,35 +200,22 @@ def write_minimap_forecast_results(
         metadata = [m + str(i) for i, m in enumerate(metadata)]
     pred_sig = preds.sigmoid()
 
-    targets = data["minimap_features"][:, :, [-4, -1]]
+    targets = data["minimap_features"][:, :, MinimapTarget.indices(out_type)]
     sequence_len = targets.shape[1] - preds.shape[1]
-    if "valid" in data:
-        valid_seq = get_valid_sequence_mask(data["valid"], sequence_len + 1)
-    else:
-        valid_seq = torch.ones(targets.shape[0], 1, dtype=torch.bool)
-    indices = torch.arange(valid_seq.shape[1], device=valid_seq.device) + sequence_len
 
     for bidx in range(preds.shape[0]):
         prefix = metadata[bidx]
-        # Only get a few random samples
-        rand_idxs: list[int] = [i.item() for i in indices[valid_seq[bidx]].cpu()]
-        random.shuffle(rand_idxs)
-        rand_idxs = rand_idxs[:n_time]
+        write_gradient_sequence(
+            targets[bidx], sequence_len, sequence_len + 1, outdir, prefix
+        )
 
-        for idx in rand_idxs:
-            prefix_ = prefix
-            if timepoints is not None:
-                prefix_ += f"_{timepoints[idx]}"
-
+        for t_idx in range(preds.shape[1]):
             write_minimaps(
-                pred_sig[bidx, idx - sequence_len],
-                targets[bidx, idx],
+                pred_sig[bidx, t_idx],
+                targets[bidx, t_idx],
                 outdir,
-                prefix,
+                prefix + ("" if timepoints is None else f"_{timepoints[t_idx]}"),
                 out_type,
-            )
-            write_gradient_sequence(
-                targets[bidx], idx, sequence_len + 1, outdir, prefix
             )
 
     with open(outdir / "samples.txt", "a") as f:

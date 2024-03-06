@@ -280,11 +280,15 @@ class MinimapSoftIoU(Statistic):
     @classmethod
     def from_config(cls, cfg: ExperimentInitConfig, **extras):
         model_cfg: MinimapModelCfg = get_model_config(config=cfg)
-        data_cfg = get_dataset_properties(cfg)
-        if "timepoints" in data_cfg:
-            timepoints = data_cfg["timepoints"].arange()
+
+        if model_cfg.future_len > 1:
+            step_sec = get_dataset_properties(cfg)["step_sec"]
+            timepoints = [
+                float(i * step_sec) for i in range(1, model_cfg.future_len + 1)
+            ]
         else:
             timepoints = None
+
         model_inst = model_cfg.get_instance()
         return cls(
             model_cfg.history_len,
@@ -308,7 +312,7 @@ class MinimapSoftIoU(Statistic):
         self,
         sequence_len: int,
         target: MinimapTarget,
-        timepoints: Sequence[float] | None = None,
+        timepoints: list[float] | None = None,
         should_sigmoid: bool = True,
         keep_batch: bool = False,
     ) -> None:
@@ -316,7 +320,7 @@ class MinimapSoftIoU(Statistic):
         self.target = target
         self.sequence_len = sequence_len
         self.should_sigmoid = should_sigmoid
-        self.timepoints = timepoints[sequence_len:] if timepoints is not None else None
+        self.timepoints = timepoints
         self.keep_batch = keep_batch
 
     @staticmethod
@@ -338,9 +342,7 @@ class MinimapSoftIoU(Statistic):
             :, :, MinimapTarget.indices(self.target)
         ]
         next_minimap = target_minimaps[:, self.sequence_len :]
-        static_unit_mask = (
-            torch.sum(target_minimaps, dim=1, keepdim=True) != target_minimaps.shape[1]
-        )
+        static_unit_mask = torch.sum(target_minimaps, dim=1) != target_minimaps.shape[1]
 
         if self.should_sigmoid:
             predictions = torch.sigmoid(predictions)
@@ -354,7 +356,7 @@ class MinimapSoftIoU(Statistic):
             motion_soft_iou = MinimapSoftIoU.calculate_soft_iou(
                 predictions[:, t_idx],
                 next_minimap[:, t_idx],
-                static_unit_mask[:, t_idx],
+                static_unit_mask,
             )
 
             postfix = "" if self.timepoints is None else f"_{self.timepoints[t_idx]}"
