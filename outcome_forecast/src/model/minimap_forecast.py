@@ -110,6 +110,42 @@ class TemporalConv2(nn.Sequential):
         self.out_ch = out_ch
 
 
+@MODEL_REGISTRY.register_module("temporal-conv-multi-out")
+class TemporalConv2Multi(nn.Sequential):
+    """Convolve over volume a few times"""
+
+    def __init__(
+        self,
+        in_ch: int,
+        hidden_ch: int,
+        out_ch: int,
+        n_timesteps: int,
+        out_timesteps: int,
+        n_layers: int = 2,
+        activation: type[nn.Module] = nn.ReLU,
+    ) -> None:
+        reduce_dim = n_timesteps - out_timesteps + 1
+
+        def make_layer(in_ch_: int):
+            return (
+                nn.Conv3d(in_ch_, hidden_ch, (3, 3, 3), padding=(1, 1, 1)),
+                nn.BatchNorm3d(hidden_ch),
+                activation(),
+            )
+
+        layers = [*make_layer(in_ch)]
+        for _ in range(n_layers - 1):
+            layers.extend(make_layer(hidden_ch))
+
+        super().__init__(
+            *layers,
+            nn.Conv3d(hidden_ch, out_ch, (reduce_dim, 3, 3), padding=(0, 1, 1)),
+            nn.BatchNorm3d(out_ch),
+            activation(),
+        )
+        self.out_ch = out_ch
+
+
 @dataclass
 class BaseConfig(TorchModelConfig):
     encoder: ModuleInitConfig
@@ -117,6 +153,10 @@ class BaseConfig(TorchModelConfig):
     decoder: ModuleInitConfig
     history_len: int = 8
     target: MinimapTarget = MinimapTarget.BOTH
+
+    @property
+    def future_len(self) -> int:
+        return 1
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int = 0) -> Any:
@@ -139,6 +179,10 @@ class BaseConfig(TorchModelConfig):
 @dataclass
 @MODEL_REGISTRY.register_module("conv-forecast-v1")
 class ConvV1Config(BaseConfig):
+    """
+    Next frame convolution forecasting v1
+    """
+
     def __post_init__(self):
         super().__post_init__()
         assert self.history_len % 2 == 0, "history_len must be even"
@@ -154,18 +198,16 @@ class ConvV1Config(BaseConfig):
         self.decoder.args["in_ch"] = temporal.out_ch + encoder.out_ch[0]
         self.decoder.args["out_ch"] = len(MinimapTarget.indices(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
-        return ConvForecaster(encoder, temporal, decoder, self.history_len)
+        return ConvForecast(encoder, temporal, decoder, self.history_len)
 
 
-class ConvForecaster(nn.Module):
+class ConvForecast(nn.Module):
     """
     Use Siamese ConvNet to Extract features
     3dConv Along Features
     Upsample and Concatenate with Last Image
     Conv Decode TemporalFeatures+Last Image for Final Output
     """
-
-    is_logit_output = True
 
     def __init__(
         self,
@@ -179,6 +221,14 @@ class ConvForecaster(nn.Module):
         self.temporal_conv = temporal
         self.decoder = decoder
         self.history_len = history_len
+
+    @property
+    def future_len(self):
+        return 1
+
+    @property
+    def is_logit_output(self):
+        return True
 
     def forward_sequence(self, inputs: Tensor) -> Tensor:
         minimap_low: list[Tensor] = []
@@ -219,6 +269,11 @@ class ConvForecaster(nn.Module):
 @dataclass
 @MODEL_REGISTRY.register_module("conv-forecast-v2")
 class ConvV2Config(BaseConfig):
+    """
+    Next frame convolution forecasting v2
+    Adds separate high res last frame context encoder
+    """
+
     last_frame_encoder: ModuleInitConfig = field(kw_only=True)
 
     def __post_init__(self):
@@ -244,18 +299,16 @@ class ConvV2Config(BaseConfig):
         self.decoder.args["out_ch"] = len(MinimapTarget.indices(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
 
-        return ConvForecasterV2(
+        return ConvForecastV2(
             encoder, temporal, decoder, last_frame_encoder, self.history_len
         )
 
 
-class ConvForecasterV2(nn.Module):
+class ConvForecastV2(nn.Module):
     """
     V2 uses another feature extractor for high resolution last frame
     features as to not add confounding factor to temporal feature inputs.
     """
-
-    is_logit_output = True
 
     def __init__(
         self,
@@ -271,6 +324,14 @@ class ConvForecasterV2(nn.Module):
         self.decoder = decoder
         self.last_frame_encoder = last_frame_encoder
         self.history_len = history_len
+
+    @property
+    def future_len(self):
+        return 1
+
+    @property
+    def is_logit_output(self):
+        return True
 
     def forward_sequence(self, inputs: Tensor) -> Tensor:
         # Squeeze and unsqueeze time dimension for siamese encoder
@@ -304,6 +365,96 @@ class ConvForecasterV2(nn.Module):
             preds.append(pred)
 
         out = torch.stack(preds, dim=1)
+        return out
+
+
+@dataclass
+@MODEL_REGISTRY.register_module("conv-forecast-v2-multiframe")
+class ConvV2MultiConfig(ConvV2Config):
+    """
+    Predicts three frames into the future rather than one
+    """
+
+    last_frame_encoder: ModuleInitConfig = field(kw_only=True)
+
+    @property
+    def future_len(self) -> int:
+        return 3
+
+    def __post_init__(self):
+        # Subtrack two off history length as we will predict 3 frames instead
+        self.history_len -= 2
+        super().__post_init__()
+
+    def get_instance(self, *args, **kwargs) -> Any:
+        """Construct modules and return conv forecaster"""
+        encoder = MODEL_REGISTRY[self.encoder.type](**self.encoder.args)
+
+        self.temporal.args["in_ch"] = encoder.out_ch
+        self.temporal.args["out_timesteps"] = self.future_len
+        temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
+
+        self.last_frame_encoder.args["in_ch"] = self.encoder.args["in_ch"]
+        last_frame_encoder = MODEL_REGISTRY[self.last_frame_encoder.type](
+            **self.last_frame_encoder.args
+        )
+
+        assert temporal.out_ch == last_frame_encoder.out_ch
+        self.decoder.args["in_ch"] = temporal.out_ch
+        self.decoder.args["out_ch"] = len(MinimapTarget.indices(self.target))
+        decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
+
+        return ConvForecastV2Multi(
+            encoder, temporal, decoder, last_frame_encoder, self.history_len
+        )
+
+
+class ConvForecastV2Multi(ConvForecastV2):
+    """ConvV2 Minimap Forecast but 3 frames output"""
+
+    @property
+    def future_len(self):
+        return 3
+
+    @property
+    def is_logit_output(self):
+        return True
+
+    def forward_sequence(self, inputs: Tensor):
+        # Squeeze and unsqueeze time dimension for siamese encoder
+        img_feats: Tensor = self.encoder(inputs.reshape(-1, *inputs.shape[2:]))
+        img_feats = img_feats.reshape(*inputs.shape[:2], *img_feats.shape[1:])
+        img_feats = img_feats.permute(0, 2, 1, 3, 4)  # [B,T,C,H,W] -> [B,C,T,H,W]
+
+        last_feats: Tensor = self.last_frame_encoder(inputs[:, -1])
+        # Add time dim
+        last_feats = last_feats.unsqueeze(2)
+
+        temporal_feats: Tensor = self.temporal_conv(img_feats)
+        temporal_feats = F.interpolate(
+            temporal_feats,
+            size=[self.future_len, *last_feats.shape[-2:]],
+            mode="trilinear",
+            align_corners=True,
+        )
+
+        cat_features = torch.cat([last_feats, temporal_feats], dim=2)
+        decoded = self.decoder(cat_features)
+        return decoded
+
+    def forward(self, inputs: dict[str, Tensor]) -> Tensor:
+        """"""
+        minimaps = inputs["minimap_features"]
+
+        pred = self.forward_sequence(minimaps[:, : self.history_len])
+        out: Tensor = F.interpolate(
+            pred,
+            mode="trilinear",
+            size=[self.future_len, *minimaps.shape[-2:]],
+            align_corners=True,
+        )
+        out = out.permute(0, 2, 1, 3, 4)  # [B,C,T,H,W] -> [B,T,C,H,W]
+
         return out
 
 
