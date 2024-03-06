@@ -124,6 +124,7 @@ class TemporalConv2Multi(nn.Sequential):
         n_layers: int = 2,
         activation: type[nn.Module] = nn.ReLU,
     ) -> None:
+        self.out_ch = out_ch
         reduce_dim = n_timesteps - out_timesteps + 1
 
         def make_layer(in_ch_: int):
@@ -143,7 +144,28 @@ class TemporalConv2Multi(nn.Sequential):
             nn.BatchNorm3d(out_ch),
             activation(),
         )
-        self.out_ch = out_ch
+
+
+@MODEL_REGISTRY.register_module("temporal-conv-decoder")
+class TemporalConv2MultiDecoder(TemporalConv2Multi):
+    """Additional point-wise linear layer with final output channels"""
+
+    def __init__(
+        self,
+        in_ch: int,
+        hidden_ch: int,
+        out_ch: int,
+        n_timesteps: int,
+        out_timesteps: int,
+        n_layers: int = 2,
+    ) -> None:
+        super().__init__(
+            in_ch, hidden_ch, hidden_ch, n_timesteps, out_timesteps, n_layers
+        )
+        # Add last pixel-wise module without ReLU
+        self.add_module(
+            str(len(self._modules)), nn.Conv3d(hidden_ch, out_ch, (1, 1, 1))
+        )
 
 
 @dataclass
