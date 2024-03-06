@@ -108,13 +108,13 @@ def evaluate(
         run_path, batch_size=batch_size
     )
     binary_acc = BinaryAcc.from_config(exp_config)
+    binary_acc.keep_batch = True
 
     outpath = run_path / outdir
     outpath.mkdir(exist_ok=True)
     logger = ParquetLogger(outpath)
 
     meta = Metadata.from_yaml(run_path / "metadata.yaml")
-
     with IntervalPbar(
         total=len(dataloader), fraction=0.1, desc="Evaluating Model..."
     ) as pbar, torch.inference_mode():
@@ -123,7 +123,14 @@ def evaluate(
                 sample = sample[0]
             preds = model(sample)
             results = binary_acc(preds, sample)
-            logger(Split.VAL, meta.iteration, results)
+            for i in range(exp_config.get_batch_size(Split.VAL)):
+                results_ = {}
+                for j, k in enumerate(results.keys()):
+                    valid = sample["valid"][i][j]
+                    if valid:
+                        results_[k] = results[k][i]
+                logger(Split.VAL, meta.iteration, results_)
+
             pbar.update(1)
 
     logger.flush()
