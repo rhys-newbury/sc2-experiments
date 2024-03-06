@@ -199,23 +199,23 @@ def write_minimap_forecast_results(
     dataFolder.mkdir(exist_ok=True)
 
     metadata = metadata_to_str(data["metadata"])
-    if all(m == metadata[0] for m in metadata):  # If batch from  same replay append idx
+    if all(m == metadata[0] for m in metadata):  # If batch from same replay append idx
         metadata = [m + str(i) for i, m in enumerate(metadata)]
     pred_sig = preds.sigmoid()
 
     targets = data["minimap_features"][:, :, MinimapTarget.indices(out_type)]
-    sequence_len = targets.shape[1] - preds.shape[1]
+    history_len = targets.shape[1] - preds.shape[1]
 
     for bidx in range(preds.shape[0]):
         prefix = metadata[bidx]
         write_gradient_sequence(
-            targets[bidx], sequence_len, sequence_len + 1, outdir, prefix, out_type
+            targets[bidx], history_len, history_len + 1, outdir, prefix, out_type
         )
 
         for t_idx in range(preds.shape[1]):
             write_minimaps(
                 pred_sig[bidx, t_idx],
-                targets[bidx, t_idx],
+                targets[bidx, history_len + t_idx],
                 outdir,
                 prefix + ("" if timepoints is None else f"_{timepoints[t_idx]}"),
                 out_type,
