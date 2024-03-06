@@ -1,7 +1,6 @@
 """Common helper functions for evaluation"""
 
 import math
-import random
 from pathlib import Path
 
 import cv2
@@ -13,7 +12,6 @@ from konductor.data import Split, get_dataset_config
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model
 
-from .utils import get_valid_sequence_mask
 from .model.minimap_forecast import MinimapTarget
 
 
@@ -160,13 +158,18 @@ def write_tiled_sequence(
 
 
 def write_gradient_sequence(
-    data: Tensor, end_idx: int, seq_len: int, folder: Path, prefix: str
+    data: Tensor,
+    end_idx: int,
+    seq_len: int,
+    folder: Path,
+    prefix: str,
+    layers: MinimapTarget,
 ):
     """Display a sequence of frames as a ghost trail to indicate motion of units over time"""
     px_vals = torch.linspace(200, 0, seq_len, dtype=torch.uint8, device=data.device)
     dataFolder = folder / "data"
     data = data.to(torch.bool)
-    for ch_idx, name in enumerate(["self", "enemy"]):
+    for ch_idx, name in enumerate(MinimapTarget.names(layers)):
         base_image = torch.full(
             data.shape[-2:], 255, dtype=torch.uint8, device=data.device
         )
@@ -206,7 +209,7 @@ def write_minimap_forecast_results(
     for bidx in range(preds.shape[0]):
         prefix = metadata[bidx]
         write_gradient_sequence(
-            targets[bidx], sequence_len, sequence_len + 1, outdir, prefix
+            targets[bidx], sequence_len, sequence_len + 1, outdir, prefix, out_type
         )
 
         for t_idx in range(preds.shape[1]):
