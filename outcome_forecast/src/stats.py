@@ -94,7 +94,8 @@ class BinaryAcc(Statistic):
             res = self.calculate_binary_accuracy(
                 pred[:, idx], targets["win"], targets["valid"][:, idx], self.keep_batch
             )
-            result[key] = res
+            if res is not None:
+                result[key] = res
         return result
 
     @staticmethod
@@ -121,7 +122,7 @@ class BinaryAcc(Statistic):
     @staticmethod
     def calculate_binary_accuracy(
         predictions: Tensor, targets: Tensor, valid_mask: Tensor, keep_batch: bool
-    ) -> float | Tensor:
+    ) -> float | Tensor | None:
         """Calculate binary accuracy considering the valid mask
 
         Args:
@@ -146,7 +147,7 @@ class BinaryAcc(Statistic):
         if total_valid_samples > 0:
             return correct_predictions / total_valid_samples
         else:
-            return 0.0  # Handle the case when there are no valid samples
+            return None  # Handle the case when there are no valid samples
 
 
 @STATISTICS_REGISTRY.register_module("win-auc")
