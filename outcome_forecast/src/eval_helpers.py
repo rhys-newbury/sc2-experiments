@@ -83,11 +83,11 @@ def create_score_frame(pred: Tensor, target: Tensor) -> Tensor:
     # subtract rg from prediction
     bgr_frame[mask] -= torch.stack([b, rg, rg], dim=-1)
 
+    tp_thresh = 0.5
     # Blue for false positives
-    bgr_frame[pred > 0.5] = torch.tensor((255, 0, 0), **ctor_kwargs)
-
+    bgr_frame[pred > tp_thresh] = torch.tensor((255, 0, 0), **ctor_kwargs)
     # Green for true positives
-    mask = (pred > 0.5) & (target == 1)
+    mask = (pred > tp_thresh) & (target == 1)
     rb = ((1 - pred) * 255).to(torch.uint8)[mask]
     g = 200 * torch.ones_like(rb)
     bgr_frame[mask] = torch.stack([rb, g, rb], dim=-1)
