@@ -50,7 +50,7 @@ class TimePoint:
         return float(self.value)
 
 
-def transform_latest_to_db_format(
+def transform_outcome_to_db_format(
     data: pd.DataFrame, time_points: list[TimePoint]
 ) -> dict[str, float]:
     """Grab the last iteration from the parquet
@@ -85,11 +85,65 @@ def gather_ml_binary_accuracy(workspace: Annotated[Path, typer.Option()] = Path.
         if not parquet_filename.exists():
             continue
         data: pd.DataFrame = pq.read_table(parquet_filename).to_pandas()
-        results = transform_latest_to_db_format(data, time_points)
+        results = transform_outcome_to_db_format(data, time_points)
         db_handle.write(table_name, exp_run.name, results)
 
     db_handle.commit()
     db_handle.con.close()
+
+
+def transform_soft_iou_to_db_format(data: pd.DataFrame) -> dict[str, float | int]:
+    """
+    Grab the last iteration from the parquet data and transform to database dictionary input format.
+    For the multi-frame minimap experiments, since the next frame is 3.0 sec, we also add this to
+    common results table.
+    """
+    iteration = data["iteration"].max()
+    average = data.query(f"iteration == {iteration}").mean()
+    transformed = {"iteration": int(iteration)}
+    parquet_2_db = {
+        "soft_iou_self": "self",
+        "soft_iou_self_3.0": "self",
+        "soft_iou_enemy": "enemy",
+        "soft_iou_enemy_3.0": "enemy",
+        "motion_soft_iou_self": "motion_self",
+        "motion_soft_iou_enemy": "motion_enemy",
+    }
+    for pq_key, db_key in parquet_2_db.items():
+        if pq_key in average:
+            transformed[db_key] = average[pq_key].item()
+    return transformed
+
+
+@app.command()
+def gather_minimap_soft_iou(workspace: Annotated[Path, typer.Option()] = Path.cwd()):
+    """Gather soft iou for each of the minimap experiments and save to analysis table"""
+    update_database(
+        workspace, "sqlite", f'{{"path": "{workspace / DEFAULT_FILENAME}"}}'
+    )
+
+    db_handle = SQLiteDB(workspace / DEFAULT_FILENAME)
+    table_name = "next_frame_soft_iou"
+    db_handle.create_table(
+        table_name,
+        {
+            "iteration": "INTEGER",
+            "self": "FLOAT",
+            "enemy": "FLOAT",
+            "motion_self": "FLOAT",
+            "motion_enemy": "FLOAT",
+        },
+    )
+
+    for exp_run in filter(lambda x: x.is_dir(), workspace.iterdir()):
+        parquet_filename = exp_run / "val_minimap-soft-iou.parquet"
+        if not parquet_filename.exists():
+            continue
+        data: pd.DataFrame = pq.read_table(parquet_filename).to_pandas()
+        results = transform_soft_iou_to_db_format(data)
+        db_handle.write(table_name, exp_run.name, results)
+
+    db_handle.commit()
 
 
 # -------------------------------------------------------------------
