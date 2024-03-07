@@ -20,6 +20,7 @@ from konductor.utilities.metadata import update_database
 from konductor.utilities.pbar import LivePbar
 from pyarrow import parquet as pq
 from torch import Tensor
+from train import apply_dali_pipe_kwargs
 
 from src.eval_helpers import (
     get_dataloader_with_metadata,
@@ -102,17 +103,30 @@ def evaluate(
     run_path: Annotated[Path, typer.Option()],
     outdir: Annotated[str, typer.Option()],
     batch_size: Annotated[Optional[int], typer.Option()] = None,
+    workers: Annotated[int, typer.Option()] = 4,
+    dali_py_workers: Annotated[int, typer.Option()] = 2,
+    dali_external_prefetch: Annotated[int, typer.Option()] = 2,
+    dali_pipe_prefetch: Annotated[int, typer.Option()] = 2,
 ):
     """Run validation and save results new subdirectory"""
     exp_config, model, dataloader = setup_eval_model_and_dataloader(
         run_path, batch_size=batch_size
     )
+
+    exp_config.set_workers(workers)
+
+    if exp_config.data[0].train_loader.type == "DALI":
+        apply_dali_pipe_kwargs(
+            exp_config, dali_py_workers, dali_pipe_prefetch, dali_external_prefetch
+        )
+
     binary_acc = BinaryAcc.from_config(exp_config)
     binary_acc.keep_batch = True
 
     outpath = run_path / outdir
     outpath.mkdir(exist_ok=True)
     logger = ParquetLogger(outpath)
+    logger.add_topic("binary-acc", binary_acc.get_keys())
 
     meta = Metadata.from_yaml(run_path / "metadata.yaml")
     with IntervalPbar(
@@ -129,7 +143,7 @@ def evaluate(
                     valid = sample["valid"][i][j]
                     if valid:
                         results_[k] = results[k][i]
-                logger(Split.VAL, meta.iteration, results_)
+                logger(Split.VAL, meta.iteration, results_, category="binary-acc")
 
             pbar.update(1)
 
@@ -229,6 +243,10 @@ def evaluate_all(
     workspace: Annotated[Path, typer.Option()],
     outdir: Annotated[str, typer.Option()],
     batch_size: Annotated[Optional[int], typer] = None,
+    workers: Annotated[Optional[int], typer.Option()] = 4,
+    dali_py_workers: Annotated[int, typer.Option()] = 2,
+    dali_external_prefetch: Annotated[int, typer.Option()] = 2,
+    dali_pipe_prefetch: Annotated[int, typer.Option()] = 2,
 ):
     """Run validaiton and save to a subdirectory"""
 
@@ -237,7 +255,50 @@ def evaluate_all(
 
     for run in filter(is_valid_run, workspace.iterdir()):
         print(f"Doing {run}")
-        evaluate(run, outdir, batch_size)
+        try:
+            evaluate(
+                run,
+                outdir,
+                batch_size,
+                workers,
+                dali_py_workers,
+                dali_external_prefetch,
+                dali_pipe_prefetch,
+            )
+        except Exception as e:
+            print(e)
+            print(
+                f"{run} did an oops oh well, anyway..moving on like nothing happened."
+            )
+            print(
+                """⠂⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⡾⣟⣿⠿⠛⠛⠋⡉⠍⡐⢠⠠⡐⡈⠌⣉⠙⠛⠛⠽⣿⣛⢽⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+                    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣶⣻⠟⠛⠉⡀⡀⠆⡁⠆⡁⠆⡐⢁⠂⠔⡁⠊⢄⠊⠔⡠⢂⠀⠉⠛⢾⣝⢶⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+                    ⠀⠀⠀⠀⠀⠀⠀⣠⠖⠉⡉⠁⠄⡌⠂⢄⠁⠒⡀⠒⡈⠔⠠⠌⡐⠢⢠⠁⠆⢨⠐⠄⠢⠡⠌⠰⢀⠈⠛⢮⣷⣆⠀⠀⠀⠀⠀⠀⡀⠀
+                    ⠀⠀⠀⠀⠀⣠⣾⡗⠁⢂⠐⡉⠐⠠⢁⠂⠌⠡⠐⠡⠈⠌⣁⠂⠄⡑⠠⠌⠒⠠⠌⡐⢁⠢⢈⠁⢢⢈⠐⡀⠉⠻⣷⣄⠀⠀⠀⠀⠀⠀
+                    ⠀⠀⠀⢀⣾⡽⠋⡀⠎⠠⠁⢄⣡⡾⠀⠌⢂⠡⢃⠡⢉⡐⠈⠻⣷⣤⣁⣂⣡⠈⠔⡈⠄⠒⡈⠌⣀⠢⢁⠤⢁⠂⠒⢾⢧⡀⠀⠈⠀⠀
+                    ⠀⠀⣠⣿⡟⠁⡐⢠⣨⣤⡷⠿⠋⠠⢁⡘⢀⠢⠄⠂⠅⡠⢁⠂⠄⡈⢉⠉⡉⢁⠂⡐⠌⠡⢐⠂⠄⢂⠄⠢⢐⠈⡐⠈⠡⣳⡀⠀⠀⠀
+                    ⢠⣴⣿⠟⢠⠂⠄⢋⠉⠠⠐⠠⢈⠄⠡⠐⡀⠢⢈⠒⠠⢁⠢⢈⢐⣤⣦⡶⠷⠾⠶⢦⣌⡐⠈⠄⡉⠤⢈⡐⠨⠐⠄⡁⢂⠡⠹⡄⠀⠀
+                    ⣿⢟⡾⠀⠂⠌⡐⠠⠈⠄⡁⠂⠄⡈⠆⣁⠂⡑⠠⢈⢂⡁⢂⣶⣿⣵⣶⣶⡶⠀⠀⠀⠈⠛⢾⣄⠄⠡⠂⠤⢁⡘⢀⠒⠠⢀⠡⠀⠀⠀
+                    ⣿⣾⠃⡈⢐⣠⡶⠷⢛⣷⣺⣷⣤⡐⠈⢄⠒⣈⠁⢂⠤⢘⣵⣿⣿⢿⣿⠏⠀⠀⠀⠀⠀⠀⠀⠉⢷⣆⠡⠌⢠⠐⠂⠌⢒⠠⠀⠀⢣⡄
+                    ⣿⡇⠐⢠⡾⠋⢀⣴⣿⣿⣿⡟⠉⠻⣆⡀⠒⡄⠨⠄⠒⣼⣿⣿⢯⣿⣿⠀⠀⠀⠂⠄⠀⠀⠀⠀⠀⠹⣦⠐⠠⠌⢂⢁⠢⠄⠡⠀⠰⣿
+                    ⢻⡅⢨⡿⠁⢠⣿⣿⣿⡿⣽⣿⠀⠀⠙⣧⠐⠠⠑⡈⣼⣿⣿⣯⣿⣟⣿⣧⡀⠀⠀⠀⣤⡀⠀⠀⠀⠀⠹⣧⠐⡈⠄⢂⠰⢈⠐⡀⡆⡿
+                    ⢻⡄⣿⠁⠀⣼⣿⣿⡿⣽⣿⢿⣷⣄⣀⣹⣇⠠⠑⡄⣿⣿⣿⣾⣯⣿⢯⣿⣿⣿⣷⣿⣿⠄⠀⠀⠀⠀⠀⢹⡇⠠⠈⠄⠂⡄⠡⠀⡇⡇
+                    ⣹⢾⡇⠀⠀⣿⣿⣿⡿⣿⣽⣿⣻⣿⣿⣿⣿⣀⠣⢰⣿⣿⡟⠉⠛⢿⣿⣯⣿⣿⣿⣿⣿⠀⠐⠀⠀⡐⠀⠰⣟⠠⢁⠊⡐⠠⢁⠂⡄⣇
+                    ⣿⡞⡇⠀⠀⢻⣿⣿⠿⠿⣿⣾⣟⣷⣿⣿⡏⣷⢉⡚⣧⢻⣧⡀⠀⣸⣿⣿⣿⣿⣿⣿⠇⠀⠠⠀⡀⢀⠀⢘⣏⠀⢂⡐⢈⠁⢂⠀⠐⣿
+                    ⣿⣧⡷⠀⠀⠈⣿⣧⡀⠀⣼⣿⣿⣿⣿⡿⠁⣿⠢⠉⣿⡀⠻⣿⣿⣿⣿⣿⣿⣿⡿⠃⠀⠀⠁⠀⠀⠀⠀⢸⡇⠈⢄⡐⠠⢊⠀⠀⢸⠷
+                    ⣿⣹⣿⠀⠀⠀⠈⠻⣿⣿⣿⣿⣿⣿⠟⠁⠀⣿⠀⠁⠘⣧⠀⠀⠙⠛⠛⠛⠛⠁⣠⣀⠀⠀⠀⠀⠀⠀⢀⣾⠃⠈⡀⠠⢁⠂⢨⣴⡏⠁
+                    ⠉⢿⡽⣆⠀⠀⠀⢀⡶⣯⠉⠛⠉⠀⠀⠀⢰⡏⠀⠌⠐⠘⣧⠀⠀⠀⠀⠀⠀⣾⠉⠉⢷⡄⠀⠀⠀⠀⣾⠁⢄⠣⠌⡑⢠⣸⢟⡞⠀⠀
+                    ⠀⠸⣿⡹⣦⡀⣠⡟⠁⢸⡇⠀⠀⠀⠀⢠⡟⠀⠠⠁⠂⢀⠘⢳⣄⠀⠀⠀⠀⣿⡀⢀⠀⠛⢦⣄⡀⣼⠇⡈⢆⡑⢂⡁⢢⢯⡟⠀⠀⠀
+                    ⠀⠀⣾⣿⣿⠿⠋⢀⠐⣺⣧⣤⠶⠶⠶⠛⠈⠳⣶⠋⠉⠁⠉⠀⠉⠛⠛⠛⠒⠛⠻⠀⠄⢂⠀⠈⠙⠻⣦⡈⠔⡈⠄⣼⣻⡟⠈⠀⠀⠀
+                    ⣬⣿⣻⠏⠁⡀⠤⠀⠄⠀⡀⠀⡀⢀⠀⠄⣐⣠⠿⢦⣄⣂⣈⡀⢁⡠⠀⠄⢂⠐⢀⠈⠠⠀⠌⡐⠠⢀⠈⠻⣦⡘⣛⣽⠋⠀⠀⠀⠀⠀
+                    ⣿⣷⠏⠀⠐⡀⠂⠌⢀⠂⠄⠁⢰⡶⠾⠛⠋⠁⡀⢀⠈⠉⠁⠉⠉⢹⡇⠀⠂⠌⡀⠄⠁⡐⠠⠀⡁⠂⠄⠀⠉⣿⣻⡇⠀⠀⠀⠀⠀⠀
+                    ⣿⡇⠀⠄⠒⡀⢁⠂⠠⢈⠀⠌⣼⡗⠀⠐⠠⠁⡐⠂⠠⠁⡘⠠⠐⠈⢿⡄⠐⠠⢀⠂⠁⡐⠀⡁⠐⠈⡐⠈⢀⢸⣿⡇⠀⠀⠀⠀⠀⠀
+                    ⣼⡅⠀⠌⠐⡀⢂⠀⠡⢀⠂⠀⣽⣿⣶⢤⣆⣐⠀⠀⡁⠠⠀⠄⠁⠠⠘⣧⠈⠐⠠⢀⠁⠄⡐⢀⠁⠂⠄⠁⢀⣾⣻⡇⠀⠀⠀⠀⠀⠀
+                    ⣿⣷⡀⠈⠐⡀⢂⠈⠄⠠⠀⢡⣿⣿⠉⠳⠾⢭⣿⣻⣶⣶⡶⠦⡼⠴⢦⣾⣄⠉⠀⠂⠈⡀⠐⠀⠈⠠⣐⣨⣾⣻⠏⠀⠀⠀⠀⠀⠀⠀
+                    ⠿⣶⣿⣤⣴⣤⣤⣤⣦⣴⣬⢾⣷⡏⠀⠀⠀⢀⢀⡉⢉⠉⠙⣛⢛⡟⣻⣿⣽⣿⠛⠶⠷⡶⠳⠟⣿⣿⣯⣽⣿⡉⠀⠀⠀⠀⠀⠀⠀⠀
+                    """
+            )
+            continue
 
 
 @app.command()
