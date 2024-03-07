@@ -461,7 +461,8 @@ class ConvForecastV2Multi(ConvForecastV2):
         )
 
         cat_features = torch.cat([last_feats, temporal_feats], dim=2)
-        decoded = self.decoder(cat_features)
+        decoded: Tensor = self.decoder(cat_features)
+        decoded = decoded.permute(0, 2, 1, 3, 4)  # [B,C,T,H,W] -> [B,T,C,H,W]
         return decoded
 
     def forward(self, inputs: dict[str, Tensor]) -> Tensor:
@@ -470,13 +471,12 @@ class ConvForecastV2Multi(ConvForecastV2):
 
         pred = self.forward_sequence(minimaps[:, : self.history_len])
         out: Tensor = F.interpolate(
-            pred,
-            mode="trilinear",
-            size=[self.future_len, *minimaps.shape[-2:]],
+            pred.reshape(-1, *pred.shape[-3:]),
+            mode="bilinear",
+            size=minimaps.shape[-2:],
             align_corners=True,
         )
-        out = out.permute(0, 2, 1, 3, 4)  # [B,C,T,H,W] -> [B,T,C,H,W]
-
+        out = out.reshape(*pred.shape[:3], *minimaps.shape[-2:])
         return out
 
 
@@ -726,6 +726,7 @@ class TransformerForecasterConfig(BaseConfig):
         temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
 
         self.decoder.args["input_dim"] = self.latent_dim
+        self.decoder.args["output_dim"] = len(MinimapTarget.indices(self.target))
         decoder = PosQueryDecoder(query_cfg=self.decoder_query, **self.decoder.args)
 
         return self.init_auto_filter(

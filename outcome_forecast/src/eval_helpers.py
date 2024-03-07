@@ -1,7 +1,6 @@
 """Common helper functions for evaluation"""
 
 import math
-import random
 from pathlib import Path
 
 import cv2
@@ -13,7 +12,6 @@ from konductor.data import Split, get_dataset_config
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model
 
-from .utils import get_valid_sequence_mask
 from .model.minimap_forecast import MinimapTarget
 
 
@@ -85,11 +83,11 @@ def create_score_frame(pred: Tensor, target: Tensor) -> Tensor:
     # subtract rg from prediction
     bgr_frame[mask] -= torch.stack([b, rg, rg], dim=-1)
 
+    tp_thresh = 0.5
     # Blue for false positives
-    bgr_frame[pred > 0.5] = torch.tensor((255, 0, 0), **ctor_kwargs)
-
+    bgr_frame[pred > tp_thresh] = torch.tensor((255, 0, 0), **ctor_kwargs)
     # Green for true positives
-    mask = (pred > 0.5) & (target == 1)
+    mask = (pred > tp_thresh) & (target == 1)
     rb = ((1 - pred) * 255).to(torch.uint8)[mask]
     g = 200 * torch.ones_like(rb)
     bgr_frame[mask] = torch.stack([rb, g, rb], dim=-1)
@@ -160,13 +158,18 @@ def write_tiled_sequence(
 
 
 def write_gradient_sequence(
-    data: Tensor, end_idx: int, seq_len: int, folder: Path, prefix: str
+    data: Tensor,
+    end_idx: int,
+    seq_len: int,
+    folder: Path,
+    prefix: str,
+    layers: MinimapTarget,
 ):
     """Display a sequence of frames as a ghost trail to indicate motion of units over time"""
     px_vals = torch.linspace(200, 0, seq_len, dtype=torch.uint8, device=data.device)
     dataFolder = folder / "data"
     data = data.to(torch.bool)
-    for ch_idx, name in enumerate(["self", "enemy"]):
+    for ch_idx, name in enumerate(MinimapTarget.names(layers)):
         base_image = torch.full(
             data.shape[-2:], 255, dtype=torch.uint8, device=data.device
         )
@@ -196,23 +199,23 @@ def write_minimap_forecast_results(
     dataFolder.mkdir(exist_ok=True)
 
     metadata = metadata_to_str(data["metadata"])
-    if all(m == metadata[0] for m in metadata):  # If batch from  same replay append idx
+    if all(m == metadata[0] for m in metadata):  # If batch from same replay append idx
         metadata = [m + str(i) for i, m in enumerate(metadata)]
     pred_sig = preds.sigmoid()
 
     targets = data["minimap_features"][:, :, MinimapTarget.indices(out_type)]
-    sequence_len = targets.shape[1] - preds.shape[1]
+    history_len = targets.shape[1] - preds.shape[1]
 
     for bidx in range(preds.shape[0]):
         prefix = metadata[bidx]
         write_gradient_sequence(
-            targets[bidx], sequence_len, sequence_len + 1, outdir, prefix
+            targets[bidx], history_len, history_len + 1, outdir, prefix, out_type
         )
 
         for t_idx in range(preds.shape[1]):
             write_minimaps(
                 pred_sig[bidx, t_idx],
-                targets[bidx, t_idx],
+                targets[bidx, history_len + t_idx],
                 outdir,
                 prefix + ("" if timepoints is None else f"_{timepoints[t_idx]}"),
                 out_type,
