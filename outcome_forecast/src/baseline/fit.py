@@ -8,17 +8,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import typer
 import yaml
+from konductor.utilities.pbar import IntervalPbar, LivePbar
+from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
 from sklearn import preprocessing, svm
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import KFold, cross_val_score
 from sklearn.neural_network import MLPClassifier
-from src.data.base_dataset import SC2ReplayOutcome
-from src.data.replay_sampler import Split, SQLSampler
-from src.utils import TimeRange
 from torch.utils.data import DataLoader
 from typing_extensions import Annotated
-from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
-from konductor.utilities.pbar import LivePbar, IntervalPbar
+
+from ..data.base_dataset import SC2ReplayOutcome
+from ..data.replay_sampler import Split, SQLSampler
+from ..utils import TimeRange
 
 try:
     import xgboost

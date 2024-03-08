@@ -1,17 +1,18 @@
-from torch.utils.data import Dataset, DataLoader
+import os
+from enum import Enum
 from pathlib import Path
+from zipfile import BadZipFile
+
 import numpy as np
 import torch
-from zipfile import BadZipFile
-from konductor.utilities.pbar import LivePbar, IntervalPbar
-from enum import Enum
-from sklearn.neural_network import MLPClassifier
+import yaml
+from konductor.utilities.pbar import IntervalPbar, LivePbar
 from sklearn import preprocessing, svm
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import KFold, cross_val_score
-import yaml
+from sklearn.neural_network import MLPClassifier
+from torch.utils.data import DataLoader, Dataset
 from typing_extensions import Annotated
-import os
 
 try:
     import xgboost
@@ -20,7 +21,6 @@ except ImportError:
 
 import typer
 
-current_script_path = Path(__file__).resolve().parent
 app = typer.Typer()
 
 
@@ -37,10 +37,7 @@ def get_model(m: Model, **config):
             case Model.XGBOOST:
                 if xgboost is None:
                     raise ImportError("Cannot Use XGBoost, as it is not installed :(")
-                return xgboost.XGBClassifier(
-                    **config,
-                    random_state=random_state,
-                )
+                return xgboost.XGBClassifier(**config, random_state=random_state)
             case Model.MLP:
                 return MLPClassifier(**config, random_state=random_state)
             case Model.SVM:
@@ -91,20 +88,18 @@ class FolderDataset(Dataset):
 
 @app.command()
 def fit_model(
-    model: Annotated[Model, typer.Option()] = "xgboost",
-    yaml_config: Annotated[Path, typer.Option()] = current_script_path
-    / "cfg"
-    / "baseline.yml",
+    model: Annotated[Model, typer.Option()] = Model.XGBOOST,
+    yaml_config: Annotated[Path, typer.Option()] = Path.cwd() / "cfg" / "baseline.yml",
     num_workers: Annotated[int, typer.Option()] = 4,
     ts_index: Annotated[int, typer.Option()] = 0,
     batch_size: Annotated[int, typer.Option()] = 8,
-    output: Annotated[Path, typer.Option()] = Path("."),
+    output: Annotated[Path, typer.Option()] = Path().cwd(),
     datapath: Annotated[Path, typer.Option()] = Path(
         "/run/user/1000/gvfs/smb-share:server=130.194.128.238,share=bryce-rhys/outcome-subset-492"
     ),
 ):
-    pn = os.environ.get("POD_NAME")
-    if pn is not None:
+
+    if pn := os.environ.get("POD_NAME"):
         ts_index = int(pn.split("-")[-1])
 
     d = FolderDataset(datapath)

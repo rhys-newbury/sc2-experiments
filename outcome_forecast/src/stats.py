@@ -368,6 +368,6 @@ class MinimapSoftIoU(Statistic):
         # valid_mask = get_valid_sequence_mask(targets["valid"], self.sequence_len)
 
         if not self.keep_batch:
-            results = {k: v.mean().item() for k, v in results.items()}
+            results = {k: v.nanmean().item() for k, v in results.items()}
 
         return results
