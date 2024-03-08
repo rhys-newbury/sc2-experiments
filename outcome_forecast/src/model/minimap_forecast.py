@@ -531,7 +531,9 @@ class TemporalConvV3(nn.Module):
 
     def forward(self, inputs: dict[str, Tensor]):
         """"""
+        ch = inputs["minimap_features"].shape[2]
         in_ch = MinimapTarget.indices(self.in_layers)
+        in_ch = [i + ch for i in in_ch]
         minimaps = inputs["minimap_features"][:, : self.history_len, in_ch]
         minimap_stack = minimaps.reshape(
             -1, self.history_len * len(in_ch), *minimaps.shape[-2:]
@@ -540,6 +542,7 @@ class TemporalConvV3(nn.Module):
         residule = F.tanh(residule)
 
         out_ch = MinimapTarget.indices(self.out_layers)
+        out_ch = [i + ch for i in out_ch]
         last_minimap = inputs["minimap_features"][:, self.history_len, out_ch]
         # Ensure prediction between 0 and 1 and unsqueeze time dimension
         prediction = torch.clamp(last_minimap + residule, 0, 1).unsqueeze(1)
