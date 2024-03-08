@@ -75,7 +75,8 @@ def evaluate_trivial_prediction(dataset: DatasetConfig) -> dict[str, float]:
 
     # Calculate average and remove soft_iou_ from key
     return {
-        k.replace("soft_iou_", ""): np.nansum(v) / len(v) for k, v in results.items()
+        k.replace("soft_iou_", ""): np.nansum(v) / np.isfinite(v).sum()
+        for k, v in results.items()
     }
 
 
@@ -88,6 +89,8 @@ def main(
     dataset = get_dataset(config)
     results = evaluate_trivial_prediction(dataset)
     results["iteration"] = 0  # Add dummy iteration
+
+    print(f"Writing results: {results}")
 
     results_db = SQLiteDB(workspace / DEFAULT_FILENAME)
     dummy_hash = "baseline_method"
