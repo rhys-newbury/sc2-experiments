@@ -52,12 +52,17 @@ class MinimapLoss(nn.Module):
     """
 
     def __init__(
-        self, history_len: int, motion_weight: float | None, target: MinimapTarget
+        self,
+        history_len: int,
+        motion_weight: float | None,
+        target: MinimapTarget,
+        pred_is_logit: bool,
     ) -> None:
         super().__init__()
         self.history_len = history_len
         self.motion_weight = motion_weight
         self.target = target
+        self.pred_is_logit = pred_is_logit
         if self.motion_weight is not None:
             assert self.motion_weight > 1, f"{motion_weight=}"
 
@@ -102,6 +107,7 @@ class MinimapLoss(nn.Module):
 @dataclass
 class MinimapCfg(LossConfig):
     history_len: int
+    pred_is_logit: bool
     motion_weight: float | None = None
     target: MinimapTarget = MinimapTarget.BOTH
 
@@ -110,6 +116,7 @@ class MinimapCfg(LossConfig):
         model_cfg: MinimapModelCfg = get_model_config(config=config)
         config.criterion[idx].args["history_len"] = model_cfg.history_len
         config.criterion[idx].args["target"] = model_cfg.target
+        config.criterion[idx].args["pred_is_logit"] = model_cfg.is_logit_output
         return super().from_config(config, idx, **kwargs)
 
 
@@ -119,7 +126,9 @@ class MinimapBCE(MinimapLoss):
         return "minimap-bce"
 
     def _loss_fn(self, preds: Tensor, target: Tensor) -> Tensor:
-        return F.binary_cross_entropy_with_logits(preds, target, reduction="none")
+        if self.pred_is_logit:
+            return F.binary_cross_entropy_with_logits(preds, target, reduction="none")
+        return F.binary_cross_entropy(preds, target, reduction="none")
 
 
 @dataclass
@@ -152,8 +161,10 @@ class MinimapFocal(MinimapLoss):
         gamma: float,
         motion_weight: float | None,
         target: MinimapTarget,
+        pred_is_logit: bool,
     ) -> None:
-        super().__init__(history_len, motion_weight, target)
+        assert pred_is_logit is False, "Focal loss incompatible with sigmoid output"
+        super().__init__(history_len, motion_weight, target, pred_is_logit)
         self.alpha = alpha
         self.gamma = gamma
 
