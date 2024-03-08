@@ -543,7 +543,7 @@ class TemporalConvV3(nn.Module):
 
         out_ch = MinimapTarget.indices(self.out_layers)
         out_ch = [i + ch for i in out_ch]
-        last_minimap = inputs["minimap_features"][:, self.history_len, out_ch]
+        last_minimap = inputs["minimap_features"][:, self.history_len - 1, out_ch]
         # Ensure prediction between 0 and 1 and unsqueeze time dimension
         prediction = torch.clamp(last_minimap + residule, 0, 1).unsqueeze(1)
         return prediction

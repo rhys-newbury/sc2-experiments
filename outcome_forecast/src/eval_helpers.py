@@ -201,7 +201,6 @@ def write_minimap_forecast_results(
     metadata = metadata_to_str(data["metadata"])
     if all(m == metadata[0] for m in metadata):  # If batch from same replay append idx
         metadata = [m + str(i) for i, m in enumerate(metadata)]
-    pred_sig = preds.sigmoid()
 
     targets = data["minimap_features"][:, :, MinimapTarget.indices(out_type)]
     history_len = targets.shape[1] - preds.shape[1]
@@ -214,7 +213,7 @@ def write_minimap_forecast_results(
 
         for t_idx in range(preds.shape[1]):
             write_minimaps(
-                pred_sig[bidx, t_idx],
+                preds[bidx, t_idx],
                 targets[bidx, history_len + t_idx],
                 outdir,
                 prefix + ("" if timepoints is None else f"_{timepoints[t_idx]}"),

@@ -408,6 +408,8 @@ def visualise_minimap_forecast(
         for sample_ in dataloader:
             sample: dict[str, Tensor] = sample_[0]
             preds: Tensor = model(sample)
+            if model.is_logit_output:
+                preds = preds.sigmoid()
             write_minimap_forecast_results(
                 preds, sample, outdir, timepoints, model_cfg.target
             )
