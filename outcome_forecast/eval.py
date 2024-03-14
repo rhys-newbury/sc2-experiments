@@ -220,6 +220,8 @@ def evaluate_percent(
     exp_config, model, _ = setup_eval_model_and_dataloader(
         run_path, batch_size=batch_size, workers=workers
     )
+    if exp_config.data[0].train_loader.type == "DALI":
+        apply_dali_pipe_kwargs(exp_config, 4, 3, 3)
     dataloader = get_dataloader_with_metadata(exp_config)
 
     binary_acc = BinaryAcc.from_config(exp_config)

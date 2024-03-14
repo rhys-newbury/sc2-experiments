@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 import torch
 import pandas as pd
+import numpy as np
 from torch import nn, Tensor
 from torch.nn import functional as F
 from konductor.data import Split, get_dataset_config
@@ -13,6 +14,7 @@ from konductor.init import ExperimentInitConfig
 from konductor.models import get_model
 
 from .model.minimap_forecast import MinimapTarget
+from .stats import MinimapSoftIoU
 
 
 def metadata_to_str(metadata: Tensor) -> list[str]:
@@ -69,7 +71,7 @@ def setup_eval_model_and_dataloader(
     return exp_config, model, dataloader
 
 
-def create_score_frame(pred: Tensor, target: Tensor) -> Tensor:
+def create_score_frame(pred: Tensor, target: Tensor) -> np.ndarray:
     """Create an rgb frame showing the ground truth and predicted frames"""
     ctor_kwargs = {"device": pred.device, "dtype": torch.uint8}
     bgr_frame = torch.full([*pred.shape, 3], 255, **ctor_kwargs)
@@ -92,11 +94,25 @@ def create_score_frame(pred: Tensor, target: Tensor) -> Tensor:
     g = 200 * torch.ones_like(rb)
     bgr_frame[mask] = torch.stack([rb, g, rb], dim=-1)
 
+    bgr_frame = cv2.resize(
+        bgr_frame.cpu().numpy(), (480, 480), interpolation=cv2.INTER_NEAREST
+    )
+
+    soft_iou = MinimapSoftIoU.calculate_soft_iou(pred, target)
+    cv2.putText(
+        bgr_frame, f"{soft_iou=:.2f}", (10, 20), cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 0, 0)
+    )
+
     return bgr_frame
 
 
 def write_minimaps(
-    pred: Tensor, target: Tensor, folder: Path, prefix: str, out_type: MinimapTarget
+    pred: Tensor,
+    target: Tensor,
+    last: Tensor,
+    folder: Path,
+    prefix: str,
+    out_type: MinimapTarget,
 ):
     """Write visualization results to disk"""
     predFolder = folder / "pred"
@@ -114,7 +130,11 @@ def write_minimaps(
 
         cv2.imwrite(
             str(predFolder / f"{prefix}_{name}_diff.png"),
-            create_score_frame(pred[idx], target[idx]).cpu().numpy(),
+            create_score_frame(pred[idx], target[idx]),
+        )
+        cv2.imwrite(
+            str(dataFolder / f"{prefix}_{name}_diff.png"),
+            create_score_frame(last[idx], target[idx]),
         )
 
 
@@ -215,6 +235,7 @@ def write_minimap_forecast_results(
             write_minimaps(
                 preds[bidx, t_idx],
                 targets[bidx, history_len + t_idx],
+                targets[bidx, history_len + t_idx - 1],
                 outdir,
                 prefix + ("" if timepoints is None else f"_{timepoints[t_idx]}"),
                 out_type,
