@@ -6,13 +6,14 @@ import numpy as np
 import typer
 import yaml
 from konductor.data import (
+    DatasetConfig,
     DatasetInitConfig,
     Split,
     make_from_init_config,
-    DatasetConfig,
 )
+from konductor.metadata.database.sqlite import DEFAULT_FILENAME, Metadata, SQLiteDB
 from konductor.utilities.pbar import LivePbar
-from konductor.metadata.database.sqlite import SQLiteDB, DEFAULT_FILENAME, Metadata
+from torch import Tensor
 
 from ..stats import MinimapSoftIoU, MinimapTarget
 
@@ -50,8 +51,11 @@ def get_dataset(config_path: Path):
 
 def evaluate_trivial_prediction(dataset: DatasetConfig) -> dict[str, float]:
     """Trivially predict the next frame with the previous frame"""
+    sequence_len = 9
+    history_len = 6
+    future_len = sequence_len - history_len
     evaluator = MinimapSoftIoU(
-        dataset.properties["clip_len"], MinimapTarget.BOTH, should_sigmoid=False
+        history_len, MinimapTarget.BOTH, list(range(3, 10, 3)), should_sigmoid=False
     )
 
     dataset.val_loader.workers = 8
@@ -64,10 +68,12 @@ def evaluate_trivial_prediction(dataset: DatasetConfig) -> dict[str, float]:
             if isinstance(sample, list):
                 sample = sample[0]
 
-            # Prediction is second-to-last minimap
-            prediction = sample["minimap_features"][
-                :, -2, None, MinimapTarget.indices(MinimapTarget.BOTH)
+            # Prediction is last minimap of history length
+            prediction: Tensor = sample["minimap_features"][
+                :, history_len - 1, None, MinimapTarget.indices(MinimapTarget.BOTH)
             ]
+            # This is repeated for the future forecasts
+            prediction = prediction.repeat(1, future_len, 1, 1, 1)
             result = evaluator(prediction, sample)
             for k, v in result.items():
                 results[k].append(v)
@@ -97,7 +103,7 @@ def main(
     results_db.update_metadata(
         dummy_hash, Metadata(Path(), brief="current frame predicts next")
     )
-    results_db.write("next_frame_soft_iou", dummy_hash, results)
+    results_db.write("sequence_soft_iou", dummy_hash, results)
     results_db.commit()
 
 
