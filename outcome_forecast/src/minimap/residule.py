@@ -117,7 +117,7 @@ class ResiduleConvV2(nn.Module):
 
     @property
     def future_len(self):
-        return 1
+        return 9 - self.history_len
 
     @property
     def is_logit_output(self):
@@ -154,7 +154,9 @@ class ResiduleConvV2(nn.Module):
             nn.Sequential(
                 nn.Upsample(scale_factor=4),
                 nn.Conv2d(out_ch, out_ch, 5, padding=2, groups=out_ch),
-                nn.Conv2d(out_ch, len(MinimapTarget.indices(target)), 1),
+                nn.Conv2d(
+                    out_ch, self.future_len * len(MinimapTarget.indices(target)), 1
+                ),
             )
         )
         self.blocks = nn.ModuleList(modules)
@@ -185,21 +187,22 @@ class ResiduleConvV2(nn.Module):
 
     def forward(self, inputs: dict[str, Tensor]):
         ch = inputs["minimap_features"].shape[2]
+
         in_ch = MinimapTarget.indices(self.in_layers)
         in_ch = [i + ch for i in in_ch]
         minimaps = inputs["minimap_features"][:, : self.history_len, in_ch]
-        residule = minimaps.reshape(
-            -1, self.history_len * len(in_ch), *minimaps.shape[-2:]
-        )
+        size = minimaps.shape[-2:]
+        residule: Tensor = minimaps.reshape(-1, self.history_len * len(in_ch), *size)
         for block in self.blocks:
             residule = block(residule)
         residule = F.tanh(residule)
 
         out_ch = MinimapTarget.indices(self.out_layers)
         out_ch = [i + ch for i in out_ch]
-        last_minimap = inputs["minimap_features"][:, self.history_len - 1, out_ch]
-        # Ensure prediction between 0 and 1 and unsqueeze time dimension
-        prediction = torch.clamp(last_minimap + residule, 0, 1).unsqueeze(1)
+        last_minimap = inputs["minimap_features"][:, self.history_len - 1, None, out_ch]
+        residule = residule.reshape(-1, self.future_len, len(out_ch), *size)
+        # Ensure prediction between 0 and 1
+        prediction = torch.clamp(last_minimap + residule, 0, 1)
         return prediction
 
 
@@ -214,7 +217,7 @@ class ResiduleConvV2Cfg(TorchModelConfig):
 
     @property
     def future_len(self) -> int:
-        return 1
+        return 9 - self.history_len
 
     @property
     def is_logit_output(self):
