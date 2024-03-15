@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Tool for gathering and formatting results"""
-import sqlite3
+import itertools
 import random
+import sqlite3
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -10,18 +11,13 @@ import pandas as pd
 import torch
 import typer
 from konductor.data import Split, get_dataset_properties
-from konductor.models import get_model_config
 from konductor.metadata.database import Metadata
-from konductor.utilities.pbar import IntervalPbar
-
 from konductor.metadata.database.sqlite import DEFAULT_FILENAME, SQLiteDB
 from konductor.metadata.loggers import ParquetLogger
+from konductor.models import get_model_config
 from konductor.utilities.metadata import update_database
-from konductor.utilities.pbar import LivePbar
+from konductor.utilities.pbar import IntervalPbar, LivePbar
 from pyarrow import parquet as pq
-from torch import Tensor
-from train import apply_dali_pipe_kwargs
-
 from src.eval_helpers import (
     get_dataloader_with_metadata,
     metadata_to_str,
@@ -31,6 +27,8 @@ from src.eval_helpers import (
 )
 from src.stats import BinaryAcc, MinimapModelCfg
 from src.utils import TimeRange
+from torch import Tensor
+from train import apply_dali_pipe_kwargs
 
 app = typer.Typer()
 
@@ -93,6 +91,28 @@ def gather_ml_binary_accuracy(workspace: Annotated[Path, typer.Option()] = Path.
     db_handle.con.close()
 
 
+_TIME_RANGE = range(3, 10, 3)
+
+
+def _make_pq_to_db():
+    base = {
+        "soft_iou_self": "self_3",
+        "soft_iou_enemy": "enemy_3",
+        "motion_soft_iou_self": "motion_self_3",
+        "motion_soft_iou_enemy": "motion_enemy_3",
+    }
+    for ts, name in itertools.product(_TIME_RANGE, ["self", "enemy"]):
+        ts_dict = {
+            f"soft_iou_{name}_{float(ts)}": f"{name}_{int(ts)}",
+            f"motion_soft_iou_{name}_{float(ts)}": f"motion_{name}_{int(ts)}",
+        }
+        base.update(ts_dict)
+    return base
+
+
+_PQ_TO_DB = _make_pq_to_db()
+
+
 def transform_soft_iou_to_db_format(data: pd.DataFrame) -> dict[str, float | int]:
     """
     Grab the last iteration from the parquet data and transform to database dictionary input format.
@@ -102,15 +122,8 @@ def transform_soft_iou_to_db_format(data: pd.DataFrame) -> dict[str, float | int
     iteration = data["iteration"].max()
     average = data.query(f"iteration == {iteration}").mean()
     transformed = {"iteration": int(iteration)}
-    parquet_2_db = {
-        "soft_iou_self": "self",
-        "soft_iou_self_3.0": "self",
-        "soft_iou_enemy": "enemy",
-        "soft_iou_enemy_3.0": "enemy",
-        "motion_soft_iou_self": "motion_self",
-        "motion_soft_iou_enemy": "motion_enemy",
-    }
-    for pq_key, db_key in parquet_2_db.items():
+
+    for pq_key, db_key in _PQ_TO_DB.items():
         if pq_key in average:
             transformed[db_key] = average[pq_key].item()
     return transformed
@@ -124,17 +137,18 @@ def gather_minimap_soft_iou(workspace: Annotated[Path, typer.Option()] = Path.cw
     )
 
     db_handle = SQLiteDB(workspace / DEFAULT_FILENAME)
-    table_name = "next_frame_soft_iou"
-    db_handle.create_table(
-        table_name,
-        {
-            "iteration": "INTEGER",
-            "self": "FLOAT",
-            "enemy": "FLOAT",
-            "motion_self": "FLOAT",
-            "motion_enemy": "FLOAT",
-        },
-    )
+    table_name = "sequence_soft_iou"
+    table_spec = {"iteration": "INTEGER"}
+    for ts in _TIME_RANGE:
+        table_spec.update(
+            {
+                f"self_{ts}": "FLOAT",
+                f"enemy_{ts}": "FLOAT",
+                f"motion_self_{ts}": "FLOAT",
+                f"motion_enemy_{ts}": "FLOAT",
+            }
+        )
+    db_handle.create_table(table_name, table_spec)
 
     for exp_run in filter(lambda x: x.is_dir(), workspace.iterdir()):
         parquet_filename = exp_run / "val_minimap-soft-iou.parquet"
