@@ -13,7 +13,7 @@ from konductor.data import Split, get_dataset_config
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model
 
-from .model.minimap_forecast import MinimapTarget
+from .minimap.common import MinimapTarget
 from .stats import MinimapSoftIoU
 
 

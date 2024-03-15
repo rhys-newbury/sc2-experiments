@@ -98,7 +98,6 @@ def fit_model(
         "/run/user/1000/gvfs/smb-share:server=130.194.128.238,share=bryce-rhys/outcome-subset-492"
     ),
 ):
-
     if pn := os.environ.get("POD_NAME"):
         ts_index = int(pn.split("-")[-1])
 

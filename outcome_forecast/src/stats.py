@@ -13,7 +13,7 @@ from konductor.models import get_model_config
 from konductor.init import ExperimentInitConfig
 from konductor.metadata.base_statistic import Statistic, STATISTICS_REGISTRY
 
-from .model.minimap_forecast import MinimapTarget, BaseConfig as MinimapModelCfg
+from .minimap.common import MinimapTarget, BaseConfig as MinimapModelCfg
 
 
 @dataclass

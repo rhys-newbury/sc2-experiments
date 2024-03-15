@@ -1,3 +1,3 @@
-from . import data, model, loss, stats
+from . import data, loss, minimap, outcome, stats
 
-__all__ = ["data", "model", "loss", "stats"]
+__all__ = ["data", "minimap", "outcome", "loss", "stats"]

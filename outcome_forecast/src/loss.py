@@ -10,7 +10,7 @@ from torch import nn, Tensor
 from torch.nn import functional as F
 
 from .utils import get_valid_sequence_mask
-from .model.minimap_forecast import MinimapTarget, BaseConfig as MinimapModelCfg
+from .minimap.common import MinimapTarget, BaseConfig as MinimapModelCfg
 
 
 class WinBCE(nn.Module):
