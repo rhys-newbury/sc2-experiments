@@ -283,14 +283,18 @@ class ResiduleUnet(nn.Module):
         target: MinimapTarget,
         hidden_chs: list[int],
         deep_supervision: bool,
+        include_heightmap: bool,
     ) -> None:
         super().__init__()
         self.in_layers = in_layers
         self.out_layers = target
         self.history_len = history_len
         self.deep_supervision = deep_supervision
+        self.include_heightmap = include_heightmap
 
         in_ch = history_len * len(MinimapTarget.indices(in_layers))
+        if include_heightmap:
+            in_ch += 1
         self.input_module = nn.Sequential(
             nn.Conv2d(in_ch, hidden_chs[0], 3, padding=1, bias=False),
             nn.Conv2d(hidden_chs[0], hidden_chs[0], 3, padding=1, bias=False),
@@ -342,9 +346,14 @@ class ResiduleUnet(nn.Module):
         in_ch = MinimapTarget.indices(self.in_layers)
         in_ch = [i + ch for i in in_ch]
         minimaps = inputs["minimap_features"][:, : self.history_len, in_ch]
-        residules = self.forward_aux(
-            minimaps.reshape(-1, self.history_len * len(in_ch), *minimaps.shape[-2:])
+        # Flatten to B[TC]HW
+        minimaps = minimaps.reshape(
+            -1, self.history_len * len(in_ch), *minimaps.shape[-2:]
         )
+        if self.include_heightmap:
+            heightmap = (inputs["minimap_features"][:, 0, [0]] - 127) / 128
+            minimaps = torch.cat([minimaps, heightmap], dim=1)
+        residules = self.forward_aux(minimaps)
 
         out_ch = MinimapTarget.indices(self.out_layers)
         out_ch = [i + ch for i in out_ch]
@@ -375,6 +384,7 @@ class ResiduleUnetCfg(TorchModelConfig):
     history_len: int = 8
     target: MinimapTarget = MinimapTarget.BOTH
     deep_supervision: bool = False
+    include_heightmap: bool = False
 
     @property
     def future_len(self) -> int:
