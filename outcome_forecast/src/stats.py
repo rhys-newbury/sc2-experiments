@@ -298,7 +298,7 @@ class MinimapSoftIoU(Statistic):
         )
 
     def get_keys(self) -> list[str]:
-        keys = ["motion_soft_iou", "soft_iou"]
+        keys = ["motion_soft_iou", "soft_iou", "diff_soft_iou"]
 
         names = MinimapTarget.names(self.target)
         keys = [f"{p}_{n}" for p, n in itertools.product(keys, names)]
@@ -343,6 +343,7 @@ class MinimapSoftIoU(Statistic):
         ]
         next_minimap = target_minimaps[:, self.sequence_len :]
         static_unit_mask = torch.sum(target_minimaps, dim=1) != target_minimaps.shape[1]
+        diff_frame_mask = target_minimaps[:, [self.sequence_len - 1]] != next_minimap
 
         if self.should_sigmoid:
             predictions = torch.sigmoid(predictions)
@@ -359,10 +360,17 @@ class MinimapSoftIoU(Statistic):
                 static_unit_mask,
             )
 
+            diff_soft_iou = MinimapSoftIoU.calculate_soft_iou(
+                predictions[:, t_idx],
+                next_minimap[:, t_idx],
+                diff_frame_mask[:, t_idx],
+            )
+
             postfix = "" if self.timepoints is None else f"_{self.timepoints[t_idx]}"
             for ch_idx, name in enumerate(MinimapTarget.names(self.target)):
                 results[f"soft_iou_{name}{postfix}"] = soft_iou[:, ch_idx]
                 results[f"motion_soft_iou_{name}{postfix}"] = motion_soft_iou[:, ch_idx]
+                results[f"diff_soft_iou_{name}{postfix}"] = diff_soft_iou[:, ch_idx]
 
         # TODO Mask out accuracy contrib of parts with invalid sequences
         # valid_mask = get_valid_sequence_mask(targets["valid"], self.sequence_len)

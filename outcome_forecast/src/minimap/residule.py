@@ -238,7 +238,7 @@ def _make_conv_block(in_channels: int, out_channels: int):
     """Double pump conv->norm->relu"""
     return nn.Sequential(
         nn.Conv2d(in_channels, out_channels, 3, 2, 1),
-        nn.InstanceNorm2d(in_channels),
+        nn.InstanceNorm2d(out_channels),
         nn.LeakyReLU(),
         nn.Conv2d(out_channels, out_channels, 3, 1, 1),
         nn.InstanceNorm2d(out_channels),
