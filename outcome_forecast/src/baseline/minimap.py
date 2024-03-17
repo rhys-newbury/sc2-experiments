@@ -12,7 +12,7 @@ from konductor.data import (
     make_from_init_config,
 )
 from konductor.metadata.database.sqlite import DEFAULT_FILENAME, Metadata, SQLiteDB
-from konductor.utilities.pbar import LivePbar
+from konductor.utilities.pbar import IntervalPbar
 from torch import Tensor
 
 from ..stats import MinimapSoftIoU, MinimapTarget
@@ -62,7 +62,7 @@ def evaluate_trivial_prediction(dataset: DatasetConfig) -> dict[str, float]:
     dataset.val_loader.dali_py_workers = 6
     dataloader = dataset.get_dataloader(Split.VAL)
     results: dict[str, list[float]] = {k: [] for k in evaluator.get_keys()}
-    with LivePbar(total=len(dataloader)) as pbar:
+    with IntervalPbar(total=len(dataloader), fraction=0.01) as pbar:
         for sample in dataloader:
             # Unwrap dali pipe list
             if isinstance(sample, list):

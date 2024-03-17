@@ -20,11 +20,10 @@ from konductor.utilities.pbar import IntervalPbar, LivePbar
 from pyarrow import parquet as pq
 from src.eval_helpers import (
     get_dataloader_with_metadata,
-    metadata_to_str,
     setup_eval_model_and_dataloader,
-    write_minimap_forecast_results,
     write_outcome_prediction,
 )
+from src.visualisation import metadata_to_str, write_minimap_forecast_results
 from src.stats import BinaryAcc, MinimapModelCfg
 from src.utils import TimeRange
 from torch import Tensor
