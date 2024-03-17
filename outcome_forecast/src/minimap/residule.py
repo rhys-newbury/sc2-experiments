@@ -232,3 +232,163 @@ class ResiduleConvV2Cfg(TorchModelConfig):
 
     def get_instance(self, *args, **kwargs) -> Any:
         return self.init_auto_filter(ResiduleConvV2)
+
+
+def _make_conv_block(in_channels: int, out_channels: int):
+    """Double pump conv->norm->relu"""
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, 3, 2, 1),
+        nn.InstanceNorm2d(in_channels),
+        nn.LeakyReLU(),
+        nn.Conv2d(out_channels, out_channels, 3, 1, 1),
+        nn.InstanceNorm2d(out_channels),
+        nn.LeakyReLU(),
+    )
+
+
+class UpsampleBlock(nn.Module):
+    def __init__(self, up_channels: int, skip_channels: int) -> None:
+        super().__init__()
+        self.transpose_conv = nn.ConvTranspose2d(up_channels, skip_channels, 2, 2)
+        self.module = nn.Sequential(
+            nn.Conv2d(skip_channels, skip_channels, 3, 1, 1),
+            nn.InstanceNorm2d(skip_channels),
+            nn.LeakyReLU(),
+            nn.Conv2d(skip_channels, skip_channels, 3, 1, 1),
+            nn.InstanceNorm2d(skip_channels),
+            nn.LeakyReLU(),
+        )
+
+    def forward(self, x: Tensor, x_skip: Tensor) -> Tensor:
+        x = self.transpose_conv(x)
+        x = self.module(x + x_skip)
+        return x
+
+
+class ResiduleUnet(nn.Module):
+    """Based on nnUnet https://arxiv.org/pdf/2110.03352v2.pdf"""
+
+    @property
+    def future_len(self):
+        return 9 - self.history_len
+
+    @property
+    def is_logit_output(self):
+        return False
+
+    def __init__(
+        self,
+        history_len: int,
+        in_layers: MinimapTarget,
+        target: MinimapTarget,
+        hidden_chs: list[int],
+        deep_supervision: bool,
+    ) -> None:
+        super().__init__()
+        self.in_layers = in_layers
+        self.out_layers = target
+        self.history_len = history_len
+        self.deep_supervision = deep_supervision
+
+        in_ch = history_len * len(MinimapTarget.indices(in_layers))
+        self.input_module = nn.Sequential(
+            nn.Conv2d(in_ch, hidden_chs[0], 3, padding=1, bias=False),
+            nn.Conv2d(hidden_chs[0], hidden_chs[0], 3, padding=1, bias=False),
+            nn.InstanceNorm2d(hidden_chs[0]),
+        )
+        self.downsamples = nn.ModuleList(
+            _make_conv_block(*args) for args in zip(hidden_chs[:-2], hidden_chs[1:])
+        )
+        self.bottleneck = _make_conv_block(hidden_chs[-2], hidden_chs[-1])
+        self.upsamples = nn.ModuleList(
+            UpsampleBlock(*args)
+            for args in zip(
+                reversed(hidden_chs[1:]),
+                reversed(hidden_chs[:-1]),
+            )
+        )
+        out_ch = self.future_len * len(MinimapTarget.indices(target))
+        out_mods = [nn.Conv2d(hidden_chs[0], out_ch, 1)]
+        if deep_supervision:
+            out_mods.append(nn.Conv2d(hidden_chs[1], out_ch, 1))
+            out_mods.append(nn.Conv2d(hidden_chs[2], out_ch, 1))
+        self.linear_proj = nn.ModuleList(out_mods)
+
+    def forward_aux(self, inputs: Tensor) -> list[Tensor]:
+        """"""
+        out = self.input_module(inputs)
+        encoder_outputs = [out]
+        for downsample in self.downsamples:
+            out = downsample(out)
+            encoder_outputs.append(out)
+        out = self.bottleneck(out)
+
+        decoder_outputs = []
+        for upsample, skip in zip(self.upsamples, reversed(encoder_outputs)):
+            out = upsample(out, skip)
+            decoder_outputs.append(out)
+
+        out = [self.linear_proj[0](out)]
+        if self.training and self.deep_supervision:
+            for i, decoder_out in enumerate(decoder_outputs[-3:-1][::-1], 1):
+                out.append(self.linear_proj[i](decoder_out))
+
+        out = [F.tanh(o) for o in out]
+        return out
+
+    def forward(self, inputs: dict[str, Tensor]):
+        ch = inputs["minimap_features"].shape[2]
+
+        in_ch = MinimapTarget.indices(self.in_layers)
+        in_ch = [i + ch for i in in_ch]
+        minimaps = inputs["minimap_features"][:, : self.history_len, in_ch]
+        residules = self.forward_aux(
+            minimaps.reshape(-1, self.history_len * len(in_ch), *minimaps.shape[-2:])
+        )
+
+        out_ch = MinimapTarget.indices(self.out_layers)
+        out_ch = [i + ch for i in out_ch]
+        last_minimap = inputs["minimap_features"][:, self.history_len - 1, out_ch]
+
+        preds: list[Tensor] = []
+        for residule in residules:
+            residule = residule.reshape(
+                -1, self.future_len, len(out_ch), *residule.shape[-2:]
+            )
+            last_resize = F.interpolate(
+                last_minimap, size=residule.shape[-2:]
+            ).unsqueeze(1)
+            # Ensure prediction between 0 and 1
+            preds.append(torch.clamp(last_resize + residule, 0, 1))
+
+        if len(preds) == 1:  # remove list dim
+            return preds[0]
+
+        return preds
+
+
+@dataclass
+@MODEL_REGISTRY.register_module("residule-unet")
+class ResiduleUnetCfg(TorchModelConfig):
+    in_layers: MinimapTarget
+    hidden_chs: list[int]
+    history_len: int = 8
+    target: MinimapTarget = MinimapTarget.BOTH
+    deep_supervision: bool = False
+
+    @property
+    def future_len(self) -> int:
+        return 9 - self.history_len
+
+    @property
+    def is_logit_output(self):
+        return False
+
+    def __post_init__(self):
+        if isinstance(self.in_layers, str):
+            self.in_layers = MinimapTarget[self.in_layers.upper()]
+        if isinstance(self.target, str):
+            self.target = MinimapTarget[self.target.upper()]
+
+    def get_instance(self, *args, **kwargs) -> Any:
+        return self.init_auto_filter(ResiduleUnet)
