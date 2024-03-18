@@ -104,7 +104,7 @@ def main(
     results_db.update_metadata(
         dummy_hash, Metadata(Path(), brief="current frame predicts next")
     )
-    results_db.write("sequence_soft_iou", dummy_hash, results)
+    results_db.write("sequence_soft_iou_2", dummy_hash, results)
     results_db.commit()
 
 

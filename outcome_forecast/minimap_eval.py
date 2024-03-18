@@ -9,13 +9,15 @@ import pandas as pd
 import torch
 import typer
 from konductor.data import Split, get_dataset_properties
+from konductor.metadata.database.metadata import Metadata
 from konductor.metadata.database.sqlite import DEFAULT_FILENAME, SQLiteDB
+from konductor.metadata.loggers import AverageMeter
 from konductor.models import get_model_config
 from konductor.utilities.metadata import update_database
 from konductor.utilities.pbar import LivePbar
 from pyarrow import parquet as pq
 from src.eval_helpers import setup_eval_model_and_dataloader
-from src.stats import MinimapModelCfg
+from src.stats import MinimapModelCfg, MinimapSoftIoU
 from src.visualisation import write_minimap_forecast_results
 from torch import Tensor
 
@@ -31,11 +33,14 @@ def _make_pq_to_db():
         "soft_iou_enemy": "enemy_3",
         "motion_soft_iou_self": "motion_self_3",
         "motion_soft_iou_enemy": "motion_enemy_3",
+        "diff_soft_iou_self": "diff_self_3",
+        "diff_soft_iou_enemy": "diff_enemy_3",
     }
     for ts, name in itertools.product(_TIME_RANGE, ["self", "enemy"]):
         ts_dict = {
             f"soft_iou_{name}_{float(ts)}": f"{name}_{int(ts)}",
             f"motion_soft_iou_{name}_{float(ts)}": f"motion_{name}_{int(ts)}",
+            f"diff_soft_iou_{name}_{float(ts)}": f"diff_{name}_{int(ts)}",
         }
         base.update(ts_dict)
     return base
@@ -90,6 +95,69 @@ def gather_minimap_soft_iou(workspace: Annotated[Path, typer.Option()] = Path.cw
         db_handle.write(table_name, exp_run.name, results)
 
     db_handle.commit()
+
+
+def make_sequence_2_table(db_handle: SQLiteDB):
+    """Make sequence2 table if not already exists"""
+    table_spec = {"iteration": "INTEGER"}
+    for prefix, name, ts in itertools.product(
+        ["", "motion_", "diff_"], ["self", "enemy"], _TIME_RANGE
+    ):
+        table_spec[f"{prefix}{name}_{ts}"] = "FLOAT"
+    db_handle.create_table("sequence_soft_iou_2", table_spec)
+
+
+@app.command()
+@torch.inference_mode()
+def run(
+    run_path: Annotated[Path, typer.Option()],
+    workers: Annotated[int, typer.Option()] = 4,
+    batch_size: Annotated[int, typer.Option()] = 96,
+):
+    """Re-run evaluation with a model and write the results to the common database"""
+    db_handle = SQLiteDB(run_path.parent / DEFAULT_FILENAME)
+    make_sequence_2_table(db_handle)
+    meta = Metadata.from_yaml(run_path / "metadata.yaml")
+    db_handle.update_metadata(run_path.name, meta)
+
+    exp_config, model, dataloader = setup_eval_model_and_dataloader(
+        run_path, split=Split.VAL, workers=workers, batch_size=batch_size
+    )
+    metric = MinimapSoftIoU.from_config(exp_config)
+    meter = AverageMeter()
+
+    with LivePbar(total=len(dataloader), desc="Evaluating") as pbar:
+        for sample in dataloader:
+            sample = sample[0]
+            preds = model(sample)
+            perf = metric(preds, sample)
+            meter.add(perf)
+            pbar.update(1)
+
+    db_format = {_PQ_TO_DB[k]: v for k, v in meter.results().items()}
+    db_handle.write("sequence_soft_iou_2", run_path.name, db_format)
+    db_handle.commit()
+
+
+@app.command()
+def run_all(
+    workspace: Annotated[Path, typer.Option()],
+    workers: Annotated[int, typer.Option()] = 4,
+    batch_size: Annotated[int, typer.Option()] = 96,
+):
+    """Re-run evaluation over all experiments in workspace and write to database"""
+
+    def has_ckpt(run_dir: Path):
+        return (run_dir / "latest.pt").exists()
+
+    exps = list(filter(has_ckpt, workspace.iterdir()))
+    for idx, exp in enumerate(exps, 1):
+        try:
+            run(exp, workers, batch_size)
+        except RuntimeError as err:
+            print(f"Failed {exp.name} with error: {err}")
+        else:
+            print(f"Processed {exp.name} ({idx} of {len(exps)})")
 
 
 @app.command()
