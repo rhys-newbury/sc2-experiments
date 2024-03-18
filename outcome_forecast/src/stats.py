@@ -279,22 +279,28 @@ class WinAUC(Statistic):
 class MinimapSoftIoU(Statistic):
     @classmethod
     def from_config(cls, cfg: ExperimentInitConfig, **extras):
-        model_cfg: MinimapModelCfg = get_model_config(config=cfg)
+        model_cfg: MinimapModelCfg = get_model_config(cfg)
+        data_props = get_dataset_properties(cfg)
 
         if model_cfg.future_len > 1:
-            step_sec = get_dataset_properties(cfg)["step_sec"]
             timepoints = [
-                float(i * step_sec) for i in range(1, model_cfg.future_len + 1)
+                float(i * data_props["step_sec"])
+                for i in range(1, model_cfg.future_len + 1)
             ]
         else:
             timepoints = None
 
-        model_inst = model_cfg.get_instance()
+        target_ch = [
+            data_props["minimap_ch_names"].index(n)
+            for n in MinimapTarget.names(model_cfg.target)
+        ]
+
         return cls(
             model_cfg.history_len,
             model_cfg.target,
+            target_ch,
             timepoints,
-            model_inst.is_logit_output,
+            model_cfg.is_logit_output,
         )
 
     def get_keys(self) -> list[str]:
@@ -312,12 +318,14 @@ class MinimapSoftIoU(Statistic):
         self,
         sequence_len: int,
         target: MinimapTarget,
+        target_ch: list[int],
         timepoints: list[float] | None = None,
         should_sigmoid: bool = True,
         keep_batch: bool = False,
     ) -> None:
         super().__init__()
         self.target = target
+        self.target_ch = target_ch
         self.sequence_len = sequence_len
         self.should_sigmoid = should_sigmoid
         self.timepoints = timepoints
@@ -338,9 +346,7 @@ class MinimapSoftIoU(Statistic):
     def __call__(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> Dict[str, float | Tensor]:
-        target_minimaps = targets["minimap_features"][
-            :, :, MinimapTarget.indices(self.target)
-        ]
+        target_minimaps = targets["minimap_features"][:, :, self.target_ch]
         next_minimap = target_minimaps[:, self.sequence_len :]
         static_unit_mask = torch.sum(target_minimaps, dim=1) != target_minimaps.shape[1]
         diff_frame_mask = target_minimaps[:, [self.sequence_len - 1]] != next_minimap

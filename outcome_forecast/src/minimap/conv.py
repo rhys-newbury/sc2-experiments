@@ -144,7 +144,7 @@ class ConvV1Config(BaseConfig):
         temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
 
         self.decoder.args["in_ch"] = temporal.out_ch + encoder.out_ch[0]
-        self.decoder.args["out_ch"] = len(MinimapTarget.indices(self.target))
+        self.decoder.args["out_ch"] = len(MinimapTarget.names(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
         return ConvForecast(encoder, temporal, decoder, self.history_len)
 
@@ -244,7 +244,7 @@ class ConvV2Config(BaseConfig):
         )
 
         self.decoder.args["in_ch"] = temporal.out_ch + last_frame_encoder.out_ch
-        self.decoder.args["out_ch"] = len(MinimapTarget.indices(self.target))
+        self.decoder.args["out_ch"] = len(MinimapTarget.names(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
 
         return ConvForecastV2(
@@ -349,7 +349,7 @@ class ConvV2MultiConfig(ConvV2Config):
 
         assert temporal.out_ch == last_frame_encoder.out_ch
         self.decoder.args["in_ch"] = temporal.out_ch
-        self.decoder.args["out_ch"] = len(MinimapTarget.indices(self.target))
+        self.decoder.args["out_ch"] = len(MinimapTarget.names(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
 
         return ConvForecastV2Multi(

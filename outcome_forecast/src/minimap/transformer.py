@@ -270,7 +270,7 @@ class TransformerForecasterConfig(BaseConfig):
         temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
 
         self.decoder.args["input_dim"] = self.latent_dim
-        self.decoder.args["output_dim"] = len(MinimapTarget.indices(self.target))
+        self.decoder.args["output_dim"] = len(MinimapTarget.names(self.target))
         decoder = PosQueryDecoder(query_cfg=self.decoder_query, **self.decoder.args)
 
         return self.init_auto_filter(

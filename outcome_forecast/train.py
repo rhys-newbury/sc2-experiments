@@ -22,7 +22,7 @@ from konductor.utilities.pbar import PbarType, pbar_wrapper
 from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
 from torch import Tensor
 from typing_extensions import Annotated
-from src.data.base_dataset import FolderDatasetConfig
+from src.data.base_dataset import SC2FolderCfg
 
 
 class Trainer(PyTorchTrainer):
@@ -160,7 +160,7 @@ def main(
     trainer = Trainer(trainer_cfg, train_modules, data_manager)
 
     data_cfg = get_dataset_config(exp_cfg)
-    if isinstance(data_cfg, FolderDatasetConfig):
+    if isinstance(data_cfg, SC2FolderCfg):
         shutil.copyfile(
             data_cfg.generation_config_path,
             exp_cfg.exp_path / data_cfg.generation_config_path.name,

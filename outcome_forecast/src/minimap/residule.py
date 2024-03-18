@@ -1,6 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from konductor.init import ExperimentInitConfig
+from konductor.data import get_dataset_properties
 import torch
 from konductor.models import MODEL_REGISTRY
 from konductor.models._pytorch import TorchModelConfig
@@ -9,6 +11,39 @@ from torch.nn import functional as F
 from torchvision.models.resnet import BasicBlock
 
 from .common import MinimapTarget
+
+
+@dataclass
+class BaseConfig(TorchModelConfig):
+    in_layers: MinimapTarget
+    input_layer_names: list[str]
+    history_len: int = 8
+    target: MinimapTarget = MinimapTarget.BOTH
+
+    @classmethod
+    def from_config(cls, config: ExperimentInitConfig, idx: int = 0) -> Any:
+        config.model[0].args["input_layer_names"] = get_dataset_properties(config)[
+            "minimap_ch_names"
+        ]
+        return super().from_config(config, idx)
+
+    def __post_init__(self):
+        if isinstance(self.target, str):
+            self.target = MinimapTarget[self.target.upper()]
+        if isinstance(self.in_layers, str):
+            self.in_layers = MinimapTarget[self.in_layers.upper()]
+
+    @property
+    def future_len(self) -> int:
+        return 9 - self.history_len
+
+    @property
+    def is_logit_output(self):
+        return False
+
+
+def _get_layer_indices(layers: list[str], target: MinimapTarget):
+    return [layers.index(n) for n in MinimapTarget.names(target)]
 
 
 class ResiduleConvV1(nn.Module):
@@ -20,7 +55,7 @@ class ResiduleConvV1(nn.Module):
 
     @property
     def future_len(self):
-        return 1
+        return 9 - self.history_len
 
     @property
     def is_logit_output(self):
@@ -33,19 +68,24 @@ class ResiduleConvV1(nn.Module):
         kernel_size: list[int],
         in_layers: MinimapTarget,
         out_layers: MinimapTarget,
+        input_layer_names: list[str],
     ) -> None:
         super().__init__()
         assert len(hidden_ch) == len(kernel_size)
-        self.in_layers = in_layers
-        self.out_layers = out_layers
+        self.in_layers = [
+            input_layer_names.index(n) for n in MinimapTarget.names(in_layers)
+        ]
+        self.out_layers = [
+            input_layer_names.index(n) for n in MinimapTarget.names(out_layers)
+        ]
         self.history_len = history_len
 
         modules = []
-        in_ch = history_len * len(MinimapTarget.indices(in_layers))
+        in_ch = history_len * len(self.in_layers)
         for out_ch, kernel in zip(hidden_ch, kernel_size):
             modules.append(self._make_layer(in_ch, out_ch, kernel))
             in_ch = out_ch
-        modules.append(nn.Conv2d(in_ch, len(MinimapTarget.indices(out_layers)), 1))
+        modules.append(nn.Conv2d(in_ch, len(self.out_layers), 1))
         self.model = nn.Sequential(*modules)
 
     @staticmethod
@@ -58,19 +98,16 @@ class ResiduleConvV1(nn.Module):
 
     def forward(self, inputs: dict[str, Tensor]):
         """"""
-        ch = inputs["minimap_features"].shape[2]
-        in_ch = MinimapTarget.indices(self.in_layers)
-        in_ch = [i + ch for i in in_ch]
-        minimaps = inputs["minimap_features"][:, : self.history_len, in_ch]
+        minimaps = inputs["minimap_features"][:, : self.history_len, self.in_layers]
         minimap_stack = minimaps.reshape(
-            -1, self.history_len * len(in_ch), *minimaps.shape[-2:]
+            -1, self.history_len * len(self.in_layers), *minimaps.shape[-2:]
         )
         residule = self.model(minimap_stack)
         residule = F.tanh(residule)
 
-        out_ch = MinimapTarget.indices(self.out_layers)
-        out_ch = [i + ch for i in out_ch]
-        last_minimap = inputs["minimap_features"][:, self.history_len - 1, out_ch]
+        last_minimap = inputs["minimap_features"][
+            :, self.history_len - 1, self.out_layers
+        ]
         # Ensure prediction between 0 and 1 and unsqueeze time dimension
         prediction = torch.clamp(last_minimap + residule, 0, 1).unsqueeze(1)
         return prediction
@@ -78,35 +115,12 @@ class ResiduleConvV1(nn.Module):
 
 @dataclass
 @MODEL_REGISTRY.register_module("residule-conv-v1")
-class ResiduleConvV1Cfg(TorchModelConfig):
-    hidden_chs: list[int]
-    kernel_sizes: list[int]
-    in_layers: MinimapTarget
-    history_len: int = 8
-    target: MinimapTarget = MinimapTarget.BOTH
-
-    def __post_init__(self):
-        if isinstance(self.target, str):
-            self.target = MinimapTarget[self.target.upper()]
-        if isinstance(self.in_layers, str):
-            self.in_layers = MinimapTarget[self.in_layers.upper()]
-
-    @property
-    def future_len(self) -> int:
-        return 1
-
-    @property
-    def is_logit_output(self):
-        return False
+class ResiduleConvV1Cfg(BaseConfig):
+    hidden_chs: list[int] = field(kw_only=True)
+    kernel_sizes: list[int] = field(kw_only=True)
 
     def get_instance(self, *args, **kwargs) -> Any:
-        return ResiduleConvV1(
-            self.history_len,
-            self.hidden_chs,
-            self.kernel_sizes,
-            self.in_layers,
-            self.target,
-        )
+        return self.init_auto_filter(ResiduleConvV1)
 
 
 # Backcompat
@@ -130,14 +144,15 @@ class ResiduleConvV2(nn.Module):
         num_blocks: list[int],
         in_layers: MinimapTarget,
         target: MinimapTarget,
+        input_layer_names: list[str],
     ) -> None:
         super().__init__()
         assert len(hidden_chs) - 1 == len(num_blocks)
-        self.in_layers = in_layers
-        self.out_layers = target
+        self.in_layers = _get_layer_indices(input_layer_names, in_layers)
+        self.out_layers = _get_layer_indices(input_layer_names, target)
         self.history_len = history_len
 
-        in_ch = history_len * len(MinimapTarget.indices(in_layers))
+        in_ch = history_len * len(self.in_layers)
         modules: list[nn.Module] = [
             nn.Sequential(
                 nn.Conv2d(in_ch, hidden_chs[0], 7, stride=2, padding=3, bias=False),
@@ -154,9 +169,7 @@ class ResiduleConvV2(nn.Module):
             nn.Sequential(
                 nn.Upsample(scale_factor=4),
                 nn.Conv2d(out_ch, out_ch, 5, padding=2, groups=out_ch),
-                nn.Conv2d(
-                    out_ch, self.future_len * len(MinimapTarget.indices(target)), 1
-                ),
+                nn.Conv2d(out_ch, self.future_len * len(self.out_layers), 1),
             )
         )
         self.blocks = nn.ModuleList(modules)
@@ -186,21 +199,19 @@ class ResiduleConvV2(nn.Module):
         return nn.Sequential(*block)
 
     def forward(self, inputs: dict[str, Tensor]):
-        ch = inputs["minimap_features"].shape[2]
-
-        in_ch = MinimapTarget.indices(self.in_layers)
-        in_ch = [i + ch for i in in_ch]
-        minimaps = inputs["minimap_features"][:, : self.history_len, in_ch]
+        minimaps = inputs["minimap_features"][:, : self.history_len, self.in_layers]
         size = minimaps.shape[-2:]
-        residule: Tensor = minimaps.reshape(-1, self.history_len * len(in_ch), *size)
+        residule: Tensor = minimaps.reshape(
+            -1, self.history_len * len(self.in_layers), *size
+        )
         for block in self.blocks:
             residule = block(residule)
         residule = F.tanh(residule)
 
-        out_ch = MinimapTarget.indices(self.out_layers)
-        out_ch = [i + ch for i in out_ch]
-        last_minimap = inputs["minimap_features"][:, self.history_len - 1, None, out_ch]
-        residule = residule.reshape(-1, self.future_len, len(out_ch), *size)
+        last_minimap = inputs["minimap_features"][
+            :, self.history_len - 1, None, self.out_layers
+        ]
+        residule = residule.reshape(-1, self.future_len, len(self.out_layers), *size)
         # Ensure prediction between 0 and 1
         prediction = torch.clamp(last_minimap + residule, 0, 1)
         return prediction
@@ -208,26 +219,12 @@ class ResiduleConvV2(nn.Module):
 
 @dataclass
 @MODEL_REGISTRY.register_module("residule-conv-v2")
-class ResiduleConvV2Cfg(TorchModelConfig):
-    in_layers: MinimapTarget
-    hidden_chs: list[int]
-    num_blocks: list[int]
-    history_len: int = 8
-    target: MinimapTarget = MinimapTarget.BOTH
-
-    @property
-    def future_len(self) -> int:
-        return 9 - self.history_len
-
-    @property
-    def is_logit_output(self):
-        return False
+class ResiduleConvV2Cfg(BaseConfig):
+    hidden_chs: list[int] = field(kw_only=True)
+    num_blocks: list[int] = field(kw_only=True)
 
     def __post_init__(self):
-        if isinstance(self.in_layers, str):
-            self.in_layers = MinimapTarget[self.in_layers.upper()]
-        if isinstance(self.target, str):
-            self.target = MinimapTarget[self.target.upper()]
+        super().__post_init__()
         assert len(self.hidden_chs) - 1 == len(self.num_blocks)
 
     def get_instance(self, *args, **kwargs) -> Any:
@@ -284,17 +281,21 @@ class ResiduleUnet(nn.Module):
         hidden_chs: list[int],
         deep_supervision: bool,
         include_heightmap: bool,
+        input_layer_names: list[str],
     ) -> None:
         super().__init__()
-        self.in_layers = in_layers
-        self.out_layers = target
+        self.in_layers = _get_layer_indices(input_layer_names, in_layers)
+        self.out_layers = _get_layer_indices(input_layer_names, target)
         self.history_len = history_len
         self.deep_supervision = deep_supervision
-        self.include_heightmap = include_heightmap
+        in_ch = history_len * len(self.in_layers)
 
-        in_ch = history_len * len(MinimapTarget.indices(in_layers))
         if include_heightmap:
+            self.height_map_idx = input_layer_names.index("heightMap")
             in_ch += 1
+        else:
+            self.height_map_idx = None
+
         self.input_module = nn.Sequential(
             nn.Conv2d(in_ch, hidden_chs[0], 3, padding=1, bias=False),
             nn.Conv2d(hidden_chs[0], hidden_chs[0], 3, padding=1, bias=False),
@@ -311,7 +312,7 @@ class ResiduleUnet(nn.Module):
                 reversed(hidden_chs[:-1]),
             )
         )
-        out_ch = self.future_len * len(MinimapTarget.indices(target))
+        out_ch = self.future_len * len(self.out_layers)
         out_mods = [nn.Conv2d(hidden_chs[0], out_ch, 1)]
         if deep_supervision:
             out_mods.append(nn.Conv2d(hidden_chs[1], out_ch, 1))
@@ -341,28 +342,25 @@ class ResiduleUnet(nn.Module):
         return out
 
     def forward(self, inputs: dict[str, Tensor]):
-        ch = inputs["minimap_features"].shape[2]
-
-        in_ch = MinimapTarget.indices(self.in_layers)
-        in_ch = [i + ch for i in in_ch]
-        minimaps = inputs["minimap_features"][:, : self.history_len, in_ch]
+        minimaps = inputs["minimap_features"][:, : self.history_len, self.in_layers]
         # Flatten to B[TC]HW
         minimaps = minimaps.reshape(
-            -1, self.history_len * len(in_ch), *minimaps.shape[-2:]
+            -1, self.history_len * len(self.in_layers), *minimaps.shape[-2:]
         )
-        if self.include_heightmap:
-            heightmap = (inputs["minimap_features"][:, 0, [0]] - 127) / 128
+        if self.height_map_idx is not None:
+            heightmap = inputs["minimap_features"][:, 0, [self.height_map_idx]]
+            heightmap = (heightmap - 127) / 128  # Normalize 0-255 -> ~[-1,1]
             minimaps = torch.cat([minimaps, heightmap], dim=1)
         residules = self.forward_aux(minimaps)
 
-        out_ch = MinimapTarget.indices(self.out_layers)
-        out_ch = [i + ch for i in out_ch]
-        last_minimap = inputs["minimap_features"][:, self.history_len - 1, out_ch]
+        last_minimap = inputs["minimap_features"][
+            :, self.history_len - 1, self.out_layers
+        ]
 
         preds: list[Tensor] = []
         for residule in residules:
             residule = residule.reshape(
-                -1, self.future_len, len(out_ch), *residule.shape[-2:]
+                -1, self.future_len, len(self.out_layers), *residule.shape[-2:]
             )
             last_resize = F.interpolate(
                 last_minimap, size=residule.shape[-2:]
@@ -378,27 +376,10 @@ class ResiduleUnet(nn.Module):
 
 @dataclass
 @MODEL_REGISTRY.register_module("residule-unet")
-class ResiduleUnetCfg(TorchModelConfig):
-    in_layers: MinimapTarget
-    hidden_chs: list[int]
-    history_len: int = 8
-    target: MinimapTarget = MinimapTarget.BOTH
+class ResiduleUnetCfg(BaseConfig):
+    hidden_chs: list[int] = field(kw_only=True)
     deep_supervision: bool = False
     include_heightmap: bool = False
-
-    @property
-    def future_len(self) -> int:
-        return 9 - self.history_len
-
-    @property
-    def is_logit_output(self):
-        return False
-
-    def __post_init__(self):
-        if isinstance(self.in_layers, str):
-            self.in_layers = MinimapTarget[self.in_layers.upper()]
-        if isinstance(self.target, str):
-            self.target = MinimapTarget[self.target.upper()]
 
     def get_instance(self, *args, **kwargs) -> Any:
         return self.init_auto_filter(ResiduleUnet)

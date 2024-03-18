@@ -15,17 +15,6 @@ class MinimapTarget(enum.Enum):
     BOTH = enum.auto()
 
     @staticmethod
-    def indices(target: "MinimapTarget"):
-        """Index of target(s) in minimap feature layer stack"""
-        match target:
-            case MinimapTarget.SELF:
-                return [-4]
-            case MinimapTarget.ENEMY:
-                return [-1]
-            case MinimapTarget.BOTH:
-                return [-4, -1]
-
-    @staticmethod
     def names(target: "MinimapTarget"):
         """Index of target(s) in minimap feature layer stack"""
         match target:
@@ -42,12 +31,13 @@ class BaseConfig(TorchModelConfig):
     encoder: ModuleInitConfig
     temporal: ModuleInitConfig
     decoder: ModuleInitConfig
+    input_layer_names: list[str]
     history_len: int = 8
     target: MinimapTarget = MinimapTarget.BOTH
 
     @property
     def future_len(self) -> int:
-        return 1
+        return 9 - self.history_len
 
     @property
     def is_logit_output(self):
@@ -58,6 +48,7 @@ class BaseConfig(TorchModelConfig):
         props = get_dataset_properties(config)
         model_cfg = config.model[idx].args
         model_cfg["encoder"]["args"]["in_ch"] = props["image_ch"]
+        model_cfg["input_layer_names"] = props["minimap_ch_names"]
         return super().from_config(config, idx)
 
     def __post_init__(self):

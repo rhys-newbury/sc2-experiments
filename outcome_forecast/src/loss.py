@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import torch
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model_config
+from konductor.data import get_dataset_properties
 from konductor.losses import LossConfig, REGISTRY
 from torch import nn, Tensor
 from torch.nn import functional as F
@@ -55,13 +56,13 @@ class MinimapLoss(nn.Module):
         self,
         history_len: int,
         motion_weight: float | None,
-        target: MinimapTarget,
+        target_ch: list[int],
         pred_is_logit: bool,
     ) -> None:
         super().__init__()
         self.history_len = history_len
         self.motion_weight = motion_weight
-        self.target = target
+        self.target_ch = target_ch
         self.pred_is_logit = pred_is_logit
         if self.motion_weight is not None:
             assert self.motion_weight > 1, f"{motion_weight=}"
@@ -85,9 +86,7 @@ class MinimapLoss(nn.Module):
     def forward(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> dict[str, Tensor]:
-        target_minimap = targets["minimap_features"][
-            :, :, MinimapTarget.indices(self.target)
-        ]
+        target_minimap = targets["minimap_features"][:, :, self.target_ch]
         next_minimap = target_minimap[:, self.history_len :]
         loss_mask = self._loss_fn(predictions, next_minimap)
 
@@ -108,14 +107,17 @@ class MinimapLoss(nn.Module):
 class MinimapCfg(LossConfig):
     history_len: int
     pred_is_logit: bool
+    target_ch: list[int]
     motion_weight: float | None = None
-    target: MinimapTarget = MinimapTarget.BOTH
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
-        model_cfg: MinimapModelCfg = get_model_config(config=config)
+        model_cfg: MinimapModelCfg = get_model_config(config)
+        minimap_layers: list[str] = get_dataset_properties(config)["minimap_ch_names"]
         config.criterion[idx].args["history_len"] = model_cfg.history_len
-        config.criterion[idx].args["target"] = model_cfg.target
+        config.criterion[idx].args["target_ch"] = [
+            minimap_layers.index(n) for n in MinimapTarget.names(model_cfg.target)
+        ]
         config.criterion[idx].args["pred_is_logit"] = model_cfg.is_logit_output
         return super().from_config(config, idx, **kwargs)
 
@@ -160,11 +162,11 @@ class MinimapFocal(MinimapLoss):
         alpha: float,
         gamma: float,
         motion_weight: float | None,
-        target: MinimapTarget,
+        target_ch: list[int],
         pred_is_logit: bool,
     ) -> None:
         assert pred_is_logit is False, "Focal loss incompatible with sigmoid output"
-        super().__init__(history_len, motion_weight, target, pred_is_logit)
+        super().__init__(history_len, motion_weight, target_ch, pred_is_logit)
         self.alpha = alpha
         self.gamma = gamma
 

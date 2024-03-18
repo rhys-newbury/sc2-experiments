@@ -5,16 +5,12 @@ from typing import Annotated
 import numpy as np
 import typer
 import yaml
-from konductor.data import (
-    DatasetConfig,
-    DatasetInitConfig,
-    Split,
-    make_from_init_config,
-)
+from konductor.data import DatasetInitConfig, Split, make_from_init_config
 from konductor.metadata.database.sqlite import DEFAULT_FILENAME, Metadata, SQLiteDB
 from konductor.utilities.pbar import IntervalPbar
 from torch import Tensor
 
+from ..data.base_dataset import SC2DatasetCfg
 from ..stats import MinimapSoftIoU, MinimapTarget
 
 app = typer.Typer()
@@ -49,7 +45,7 @@ def get_dataset(config_path: Path):
     return dataset_cfg
 
 
-def evaluate_trivial_prediction(dataset: DatasetConfig) -> dict[str, float]:
+def evaluate_trivial_prediction(dataset: SC2DatasetCfg) -> dict[str, float]:
     """Trivially predict the next frame with the previous frame"""
     sequence_len = 9
     history_len = 6
@@ -58,6 +54,11 @@ def evaluate_trivial_prediction(dataset: DatasetConfig) -> dict[str, float]:
         history_len, MinimapTarget.BOTH, list(range(3, 10, 3)), should_sigmoid=False
     )
 
+    assert dataset.minimap_ch_names is not None
+    target_ch = [
+        dataset.minimap_ch_names.index(n)
+        for n in MinimapTarget.names(MinimapTarget.BOTH)
+    ]
     dataset.val_loader.workers = 8
     dataset.val_loader.dali_py_workers = 6
     dataloader = dataset.get_dataloader(Split.VAL)
@@ -70,7 +71,7 @@ def evaluate_trivial_prediction(dataset: DatasetConfig) -> dict[str, float]:
 
             # Prediction is last minimap of history length
             prediction: Tensor = sample["minimap_features"][
-                :, history_len - 1, None, MinimapTarget.indices(MinimapTarget.BOTH)
+                :, history_len - 1, None, target_ch
             ]
             # This is repeated for the future forecasts
             prediction = prediction.repeat(1, future_len, 1, 1, 1)
