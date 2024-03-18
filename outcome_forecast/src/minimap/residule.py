@@ -64,25 +64,25 @@ class ResiduleConvV1(nn.Module):
     def __init__(
         self,
         history_len: int,
-        hidden_ch: list[int],
-        kernel_size: list[int],
+        hidden_chs: list[int],
+        kernel_sizes: list[int],
         in_layers: MinimapTarget,
-        out_layers: MinimapTarget,
+        target: MinimapTarget,
         input_layer_names: list[str],
     ) -> None:
         super().__init__()
-        assert len(hidden_ch) == len(kernel_size)
+        assert len(hidden_chs) == len(kernel_sizes)
         self.in_layers = [
             input_layer_names.index(n) for n in MinimapTarget.names(in_layers)
         ]
         self.out_layers = [
-            input_layer_names.index(n) for n in MinimapTarget.names(out_layers)
+            input_layer_names.index(n) for n in MinimapTarget.names(target)
         ]
         self.history_len = history_len
 
         modules = []
         in_ch = history_len * len(self.in_layers)
-        for out_ch, kernel in zip(hidden_ch, kernel_size):
+        for out_ch, kernel in zip(hidden_chs, kernel_sizes):
             modules.append(self._make_layer(in_ch, out_ch, kernel))
             in_ch = out_ch
         modules.append(nn.Conv2d(in_ch, len(self.out_layers), 1))

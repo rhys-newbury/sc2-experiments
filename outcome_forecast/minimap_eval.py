@@ -2,6 +2,7 @@
 """Tool for gathering and formatting minimap results"""
 import itertools
 import random
+from contextlib import closing
 from pathlib import Path
 from typing import Annotated
 
@@ -115,10 +116,10 @@ def run(
     batch_size: Annotated[int, typer.Option()] = 96,
 ):
     """Re-run evaluation with a model and write the results to the common database"""
-    db_handle = SQLiteDB(run_path.parent / DEFAULT_FILENAME)
-    make_sequence_2_table(db_handle)
-    meta = Metadata.from_yaml(run_path / "metadata.yaml")
-    db_handle.update_metadata(run_path.name, meta)
+    with closing(SQLiteDB(run_path.parent / DEFAULT_FILENAME)) as db_handle:
+        meta = Metadata.from_yaml(run_path / "metadata.yaml")
+        db_handle.update_metadata(run_path.name, meta)
+        db_handle.commit()
 
     exp_config, model, dataloader = setup_eval_model_and_dataloader(
         run_path, split=Split.VAL, workers=workers, batch_size=batch_size
@@ -135,8 +136,9 @@ def run(
             pbar.update(1)
 
     db_format = {_PQ_TO_DB[k]: v for k, v in meter.results().items()}
-    db_handle.write("sequence_soft_iou_2", run_path.name, db_format)
-    db_handle.commit()
+    with closing(SQLiteDB(run_path.parent / DEFAULT_FILENAME)) as db_handle:
+        db_handle.write("sequence_soft_iou_2", run_path.name, db_format)
+        db_handle.commit()
 
 
 @app.command()
@@ -146,15 +148,25 @@ def run_all(
     batch_size: Annotated[int, typer.Option()] = 96,
 ):
     """Re-run evaluation over all experiments in workspace and write to database"""
+    with closing(SQLiteDB(workspace / DEFAULT_FILENAME)) as db_handle:
+        make_sequence_2_table(db_handle)
+        existing = {
+            res[0]
+            for res in db_handle.cursor()
+            .execute("SELECT hash FROM sequence_soft_iou_2;")
+            .fetchall()
+        }
 
-    def has_ckpt(run_dir: Path):
-        return (run_dir / "latest.pt").exists()
+    def run_filt(run_dir: Path):
+        res = (run_dir / "latest.pt").exists()
+        res &= run_dir.name not in existing
+        return res
 
-    exps = list(filter(has_ckpt, workspace.iterdir()))
+    exps = list(filter(run_filt, workspace.iterdir()))
     for idx, exp in enumerate(exps, 1):
         try:
             run(exp, workers, batch_size)
-        except RuntimeError as err:
+        except Exception as err:
             print(f"Failed {exp.name} with error: {err}")
         else:
             print(f"Processed {exp.name} ({idx} of {len(exps)})")
