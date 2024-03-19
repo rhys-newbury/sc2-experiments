@@ -9,7 +9,7 @@ from typing import Annotated
 import pandas as pd
 import torch
 import typer
-from konductor.data import Split, get_dataset_properties
+from konductor.data import Split, get_dataset_config, get_dataset_properties
 from konductor.metadata.database.metadata import Metadata
 from konductor.metadata.database.sqlite import DEFAULT_FILENAME, SQLiteDB
 from konductor.metadata.loggers import AverageMeter
@@ -17,6 +17,7 @@ from konductor.models import get_model_config
 from konductor.utilities.metadata import update_database
 from konductor.utilities.pbar import LivePbar
 from pyarrow import parquet as pq
+from src.data.base_dataset import SC2DatasetCfg
 from src.eval_helpers import setup_eval_model_and_dataloader
 from src.stats import MinimapModelCfg, MinimapSoftIoU
 from src.visualisation import write_minimap_forecast_results
@@ -187,6 +188,8 @@ def visualise_minimap_forecast(
     )
 
     model_cfg: MinimapModelCfg = get_model_config(exp_config)
+    data_cfg: SC2DatasetCfg = get_dataset_config(exp_config)
+    assert data_cfg.minimap_ch_names is not None
 
     if model_cfg.future_len > 1:
         step_sec = get_dataset_properties(exp_config)["step_sec"]
@@ -205,7 +208,12 @@ def visualise_minimap_forecast(
             if model.is_logit_output:
                 preds = preds.sigmoid()
             write_minimap_forecast_results(
-                preds, sample, outdir, timepoints, model_cfg.target
+                preds,
+                sample,
+                outdir,
+                timepoints,
+                model_cfg.target,
+                data_cfg.minimap_ch_names,
             )
             pbar.update(preds.shape[0])
             if pbar.n >= n_samples:

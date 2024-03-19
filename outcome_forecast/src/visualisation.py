@@ -147,6 +147,7 @@ def write_minimap_forecast_results(
     outdir: Path,
     timepoints: list[float] | None,
     out_type: MinimapTarget,
+    ch_names: list[str],
 ):
     """
     Write minimap forecast predictions for konduct review image viewer.
@@ -163,7 +164,8 @@ def write_minimap_forecast_results(
     if all(m == metadata[0] for m in metadata):  # If batch from same replay append idx
         metadata = [m + str(i) for i, m in enumerate(metadata)]
 
-    targets = data["minimap_features"][:, :, MinimapTarget.indices(out_type)]
+    layer_idxs = [ch_names.index(n) for n in MinimapTarget.names(out_type)]
+    targets = data["minimap_features"][:, :, layer_idxs]
     history_len = targets.shape[1] - preds.shape[1]
 
     for bidx in range(preds.shape[0]):
