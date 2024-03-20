@@ -14,6 +14,8 @@ from ..stats import MinimapSoftIoU, MinimapTarget
 
 app = typer.Typer()
 
+EVAL_BATCH_SIZE = 64
+
 
 def get_dataset(config_path: Path):
     """
@@ -61,6 +63,7 @@ def evaluate_trivial_prediction(dataset: SC2DatasetCfg) -> dict[str, float]:
         timepoints=list(range(3, 10, 3)),
         should_sigmoid=False,
     )
+    dataset.val_loader.batch_size = EVAL_BATCH_SIZE
     dataset.val_loader.workers = 8
     dataset.val_loader.dali_py_workers = 6
     dataloader = dataset.get_dataloader(Split.VAL)

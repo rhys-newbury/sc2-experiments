@@ -21,6 +21,7 @@ from src.data.base_dataset import SC2DatasetCfg
 from src.eval_helpers import setup_eval_model_and_dataloader
 from src.stats import MinimapModelCfg, MinimapSoftIoU
 from src.visualisation import write_minimap_forecast_results
+from src.baseline.minimap import EVAL_BATCH_SIZE
 from torch import Tensor
 
 app = typer.Typer()
@@ -114,7 +115,6 @@ def make_sequence_2_table(db_handle: SQLiteDB):
 def run(
     run_path: Annotated[Path, typer.Option()],
     workers: Annotated[int, typer.Option()] = 4,
-    batch_size: Annotated[int, typer.Option()] = 96,
 ):
     """Re-run evaluation with a model and write the results to the common database"""
     with closing(SQLiteDB(run_path.parent / DEFAULT_FILENAME)) as db_handle:
@@ -123,7 +123,7 @@ def run(
         db_handle.commit()
 
     exp_config, model, dataloader = setup_eval_model_and_dataloader(
-        run_path, split=Split.VAL, workers=workers, batch_size=batch_size
+        run_path, split=Split.VAL, workers=workers, batch_size=EVAL_BATCH_SIZE
     )
     metric = MinimapSoftIoU.from_config(exp_config)
     meter = AverageMeter()
@@ -146,7 +146,6 @@ def run(
 def run_all(
     workspace: Annotated[Path, typer.Option()],
     workers: Annotated[int, typer.Option()] = 4,
-    batch_size: Annotated[int, typer.Option()] = 96,
 ):
     """Re-run evaluation over all experiments in workspace and write to database"""
     with closing(SQLiteDB(workspace / DEFAULT_FILENAME)) as db_handle:
@@ -166,7 +165,7 @@ def run_all(
     exps = list(filter(run_filt, workspace.iterdir()))
     for idx, exp in enumerate(exps, 1):
         try:
-            run(exp, workers, batch_size)
+            run(exp, workers)
         except Exception as err:
             print(f"Failed {exp.name} with error: {err}")
         else:
