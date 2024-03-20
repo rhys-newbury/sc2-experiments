@@ -250,7 +250,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
                 )
         return sample_indices
 
-    def load_valid_indices(self, shuffle=True):
+    def load_valid_indices(self, shuffle: bool = True):
         """
         Read the valid sequence file and find the replay hash and player id
         """
@@ -277,10 +277,11 @@ class DaliReplayClipDataset(BaseDALIDataset):
             np.random.shuffle(self.valid_indices)
 
     def get_sequence_with_mask_file(self, offset: int, retry_depth: int):
-        """
-        Get the valid sequence with an offset from the randomly shuffled set
-        """
+        """Get the valid sequence with an offset from the randomly shuffled set"""
         assert self.valid_indices is not None
+        if not self.random_shuffle:  # consistently sample ~evenly along the indicies
+            offset *= max(len(self.valid_indices) // self.batch_size, 1)
+
         sample_indices = self.get_sample_indices_from_start(
             self.parser.data.gameStep[
                 self.valid_indices[offset % len(self.valid_indices)].item()
@@ -348,7 +349,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         self.parser.parse_replay(replay_data)
 
         if self.valid_clip_file is not None:
-            self.load_valid_indices(shuffle=True)
+            self.load_valid_indices(shuffle=self.random_shuffle)
 
         if self.yields_batch:
             samples = [
