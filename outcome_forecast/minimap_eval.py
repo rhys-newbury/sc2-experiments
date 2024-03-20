@@ -137,6 +137,7 @@ def run(
             pbar.update(1)
 
     db_format = {_PQ_TO_DB[k]: v for k, v in meter.results().items()}
+    db_format["iteration"] = meta.iteration
     with closing(SQLiteDB(run_path.parent / DEFAULT_FILENAME)) as db_handle:
         db_handle.write("sequence_soft_iou_2", run_path.name, db_format)
         db_handle.commit()
