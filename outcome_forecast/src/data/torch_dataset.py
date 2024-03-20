@@ -172,7 +172,6 @@ class SC2ReplayBaseConfig(SC2SamplerCfg):
         raise NotImplementedError
 
     def get_dataloader(self, split: Split) -> Any:
-
         sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](
             split=split,
             train_ratio=self.train_ratio,

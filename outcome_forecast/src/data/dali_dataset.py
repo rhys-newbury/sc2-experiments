@@ -279,7 +279,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
     def get_sequence_with_mask_file(self, offset: int, retry_depth: int):
         """Get the valid sequence with an offset from the randomly shuffled set"""
         assert self.valid_indices is not None
-        if not self.random_shuffle:  # consistently sample ~evenly along the indicies
+        if not self.random_shuffle:  # consistently sample ~evenly along the indices
             offset *= max(len(self.valid_indices) // self.batch_size, 1)
 
         sample_indices = self.get_sample_indices_from_start(

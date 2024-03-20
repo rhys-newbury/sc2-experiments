@@ -128,7 +128,6 @@ MODEL_REGISTRY.register_module("conv-forecast-v3", ResiduleConvV1Cfg)
 
 
 class ResiduleConvV2(nn.Module):
-
     @property
     def future_len(self):
         return 9 - self.history_len
@@ -186,7 +185,7 @@ class ResiduleConvV2(nn.Module):
 
         for m in self.modules():
             if isinstance(m, BasicBlock) and m.bn2.weight is not None:
-                nn.init.constant_(m.bn2.weight, 0)  # Make identiy
+                nn.init.constant_(m.bn2.weight, 0)  # Make identity
 
     @staticmethod
     def _make_block(in_ch: int, out_ch: int, num_block: int):

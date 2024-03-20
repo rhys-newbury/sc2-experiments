@@ -156,7 +156,3 @@ def fit_model(
                 f"{model_scores.mean():.4f} accuracy with a standard deviation of "
                 f"{model_scores.std():.4f}"
             )
-
-
-if __name__ == "__main__":
-    app()

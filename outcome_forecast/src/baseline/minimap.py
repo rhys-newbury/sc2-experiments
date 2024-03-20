@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from pathlib import Path
 from typing import Annotated
 
@@ -50,15 +49,18 @@ def evaluate_trivial_prediction(dataset: SC2DatasetCfg) -> dict[str, float]:
     sequence_len = 9
     history_len = 6
     future_len = sequence_len - history_len
-    evaluator = MinimapSoftIoU(
-        history_len, MinimapTarget.BOTH, list(range(3, 10, 3)), should_sigmoid=False
-    )
-
     assert dataset.minimap_ch_names is not None
     target_ch = [
         dataset.minimap_ch_names.index(n)
         for n in MinimapTarget.names(MinimapTarget.BOTH)
     ]
+    evaluator = MinimapSoftIoU(
+        history_len,
+        MinimapTarget.BOTH,
+        target_ch,
+        timepoints=list(range(3, 10, 3)),
+        should_sigmoid=False,
+    )
     dataset.val_loader.workers = 8
     dataset.val_loader.dali_py_workers = 6
     dataloader = dataset.get_dataloader(Split.VAL)
@@ -106,7 +108,3 @@ def main(
     )
     results_db.write("sequence_soft_iou_2", dummy_hash, results)
     results_db.commit()
-
-
-if __name__ == "__main__":
-    app()
