@@ -270,7 +270,7 @@ class ResiduleUnet(nn.Module):
 
     @property
     def is_logit_output(self):
-        return False
+        return self.disable_residule
 
     def __init__(
         self,
@@ -281,12 +281,14 @@ class ResiduleUnet(nn.Module):
         deep_supervision: bool,
         include_heightmap: bool,
         input_layer_names: list[str],
+        disable_residule: bool,
     ) -> None:
         super().__init__()
         self.in_layers = _get_layer_indices(input_layer_names, in_layers)
         self.out_layers = _get_layer_indices(input_layer_names, target)
         self.history_len = history_len
         self.deep_supervision = deep_supervision
+        self.disable_residule = disable_residule
         in_ch = history_len * len(self.in_layers)
 
         if include_heightmap:
@@ -332,12 +334,20 @@ class ResiduleUnet(nn.Module):
             out = upsample(out, skip)
             decoder_outputs.append(out)
 
-        out = [self.linear_proj[0](out)]
+        out: list[Tensor] = [self.linear_proj[0](out)]
         if self.training and self.deep_supervision:
             for i, decoder_out in enumerate(decoder_outputs[-3:-1][::-1], 1):
                 out.append(self.linear_proj[i](decoder_out))
 
-        out = [F.tanh(o) for o in out]
+        # Transform to BTCHW
+        out = [
+            o.reshape(-1, self.future_len, len(self.out_layers), *o.shape[-2:])
+            for o in out
+        ]
+
+        if not self.disable_residule:
+            out = [F.tanh(o) for o in out]
+
         return out
 
     def forward(self, inputs: dict[str, Tensor]):
@@ -352,25 +362,22 @@ class ResiduleUnet(nn.Module):
             minimaps = torch.cat([minimaps, heightmap], dim=1)
         residules = self.forward_aux(minimaps)
 
+        if self.disable_residule:
+            return residules[0] if len(residules) == 1 else residules
+
         last_minimap = inputs["minimap_features"][
             :, self.history_len - 1, self.out_layers
         ]
 
         preds: list[Tensor] = []
         for residule in residules:
-            residule = residule.reshape(
-                -1, self.future_len, len(self.out_layers), *residule.shape[-2:]
-            )
             last_resize = F.interpolate(
                 last_minimap, size=residule.shape[-2:]
             ).unsqueeze(1)
             # Ensure prediction between 0 and 1
             preds.append(torch.clamp(last_resize + residule, 0, 1))
 
-        if len(preds) == 1:  # remove list dim
-            return preds[0]
-
-        return preds
+        return preds[0] if len(preds) == 1 else preds
 
 
 @dataclass
@@ -379,6 +386,11 @@ class ResiduleUnetCfg(BaseConfig):
     hidden_chs: list[int] = field(kw_only=True)
     deep_supervision: bool = False
     include_heightmap: bool = False
+    disable_residule: bool = False
+
+    @property
+    def is_logit_output(self):
+        return self.disable_residule
 
     def get_instance(self, *args, **kwargs) -> Any:
         return self.init_auto_filter(ResiduleUnet)
