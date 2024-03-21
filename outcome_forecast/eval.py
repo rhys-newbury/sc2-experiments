@@ -211,7 +211,7 @@ def evaluate_percent(
     database: Annotated[Path, typer.Option()],
     num_buckets: Annotated[int, typer.Option()] = 50,
     batch_size: Annotated[Optional[int], typer.Option()] = None,
-    workers: Annotated[Optional[int], typer.Option()] = None,
+    workers: Annotated[int, typer.Option()] = 8,
 ):
     """Run validation and save results new subdirectory"""
     conn = sqlite3.connect(str(database))
@@ -220,6 +220,9 @@ def evaluate_percent(
     exp_config, model, _ = setup_eval_model_and_dataloader(
         run_path, batch_size=batch_size, workers=workers
     )
+
+    apply_dali_pipe_kwargs(exp_config, 4, 3, 3)
+
     dataloader = get_dataloader_with_metadata(exp_config)
 
     binary_acc = BinaryAcc.from_config(exp_config)
@@ -355,6 +358,10 @@ def evaluate_all(
             continue
 
 
+def and_filter(*funcs, items):
+    return filter(lambda x: all(f(x) for f in funcs), items)
+
+
 @app.command()
 def evaluate_all_percent(
     workspace: Annotated[Path, typer.Option()],
@@ -369,7 +376,10 @@ def evaluate_all_percent(
     def is_valid_run(path: Path):
         return path.is_dir() and (path / "latest.pt").exists()
 
-    for run in filter(is_valid_run, workspace.iterdir()):
+    def no_results_exist(path: Path):
+        return not (path / outdir / "game_length_results_50").exists()
+
+    for run in and_filter(is_valid_run, no_results_exist, items=workspace.iterdir()):
         print(f"Doing {run}")
         try:
             evaluate_percent(run, outdir, database, num_buckets, batch_size, workers)
