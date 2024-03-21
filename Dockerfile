@@ -27,7 +27,7 @@ WORKDIR /app
 RUN mkdir database_tools && cd database_tools && \
     wget https://raw.githubusercontent.com/5had3z/sc2-serializer/main/scripts/replay_sql.py
 
-RUN pip install git+https://github.com/5had3z/konductor@be8c83a
+RUN pip install git+https://github.com/5had3z/konductor@f2bbb63
 
 ARG COMMIT
 RUN [ ! -z "${COMMIT}" ]
