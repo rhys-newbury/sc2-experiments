@@ -13,7 +13,7 @@ from konductor.models import get_model_config
 from konductor.init import ExperimentInitConfig
 from konductor.metadata.base_statistic import Statistic, STATISTICS_REGISTRY
 
-from .model.minimap_forecast import MinimapTarget, BaseConfig as MinimapModelCfg
+from .minimap.common import MinimapTarget, BaseConfig as MinimapModelCfg
 
 
 @dataclass
@@ -279,26 +279,32 @@ class WinAUC(Statistic):
 class MinimapSoftIoU(Statistic):
     @classmethod
     def from_config(cls, cfg: ExperimentInitConfig, **extras):
-        model_cfg: MinimapModelCfg = get_model_config(config=cfg)
+        model_cfg: MinimapModelCfg = get_model_config(cfg)
+        data_props = get_dataset_properties(cfg)
 
         if model_cfg.future_len > 1:
-            step_sec = get_dataset_properties(cfg)["step_sec"]
             timepoints = [
-                float(i * step_sec) for i in range(1, model_cfg.future_len + 1)
+                float(i * data_props["step_sec"])
+                for i in range(1, model_cfg.future_len + 1)
             ]
         else:
             timepoints = None
 
-        model_inst = model_cfg.get_instance()
+        target_ch = [
+            data_props["minimap_ch_names"].index(n)
+            for n in MinimapTarget.names(model_cfg.target)
+        ]
+
         return cls(
             model_cfg.history_len,
             model_cfg.target,
+            target_ch,
             timepoints,
-            model_inst.is_logit_output,
+            model_cfg.is_logit_output,
         )
 
     def get_keys(self) -> list[str]:
-        keys = ["motion_soft_iou", "soft_iou"]
+        keys = ["motion_soft_iou", "soft_iou", "diff_soft_iou"]
 
         names = MinimapTarget.names(self.target)
         keys = [f"{p}_{n}" for p, n in itertools.product(keys, names)]
@@ -312,12 +318,14 @@ class MinimapSoftIoU(Statistic):
         self,
         sequence_len: int,
         target: MinimapTarget,
+        target_ch: list[int],
         timepoints: list[float] | None = None,
         should_sigmoid: bool = True,
         keep_batch: bool = False,
     ) -> None:
         super().__init__()
         self.target = target
+        self.target_ch = target_ch
         self.sequence_len = sequence_len
         self.should_sigmoid = should_sigmoid
         self.timepoints = timepoints
@@ -338,11 +346,10 @@ class MinimapSoftIoU(Statistic):
     def __call__(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> Dict[str, float | Tensor]:
-        target_minimaps = targets["minimap_features"][
-            :, :, MinimapTarget.indices(self.target)
-        ]
+        target_minimaps = targets["minimap_features"][:, :, self.target_ch]
         next_minimap = target_minimaps[:, self.sequence_len :]
         static_unit_mask = torch.sum(target_minimaps, dim=1) != target_minimaps.shape[1]
+        diff_frame_mask = target_minimaps[:, [self.sequence_len - 1]] != next_minimap
 
         if self.should_sigmoid:
             predictions = torch.sigmoid(predictions)
@@ -359,15 +366,22 @@ class MinimapSoftIoU(Statistic):
                 static_unit_mask,
             )
 
+            diff_soft_iou = MinimapSoftIoU.calculate_soft_iou(
+                predictions[:, t_idx],
+                next_minimap[:, t_idx],
+                diff_frame_mask[:, t_idx],
+            )
+
             postfix = "" if self.timepoints is None else f"_{self.timepoints[t_idx]}"
             for ch_idx, name in enumerate(MinimapTarget.names(self.target)):
                 results[f"soft_iou_{name}{postfix}"] = soft_iou[:, ch_idx]
                 results[f"motion_soft_iou_{name}{postfix}"] = motion_soft_iou[:, ch_idx]
+                results[f"diff_soft_iou_{name}{postfix}"] = diff_soft_iou[:, ch_idx]
 
         # TODO Mask out accuracy contrib of parts with invalid sequences
         # valid_mask = get_valid_sequence_mask(targets["valid"], self.sequence_len)
 
         if not self.keep_batch:
-            results = {k: v.mean().item() for k, v in results.items()}
+            results = {k: v.nanmean().item() for k, v in results.items()}
 
         return results

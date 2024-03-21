@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Tool for gathering and formatting results"""
+"""Tool for gathering and formatting outcome results"""
 import sqlite3
-import random
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -10,27 +9,22 @@ import pandas as pd
 import torch
 import typer
 from konductor.data import Split, get_dataset_properties
-from konductor.models import get_model_config
 from konductor.metadata.database import Metadata
-from konductor.utilities.pbar import IntervalPbar
-
 from konductor.metadata.database.sqlite import DEFAULT_FILENAME, SQLiteDB
 from konductor.metadata.loggers import ParquetLogger
 from konductor.utilities.metadata import update_database
-from konductor.utilities.pbar import LivePbar
+from konductor.utilities.pbar import IntervalPbar, LivePbar
 from pyarrow import parquet as pq
-from torch import Tensor
-from train import apply_dali_pipe_kwargs
-
 from src.eval_helpers import (
     get_dataloader_with_metadata,
-    metadata_to_str,
     setup_eval_model_and_dataloader,
-    write_minimap_forecast_results,
     write_outcome_prediction,
 )
-from src.stats import BinaryAcc, MinimapModelCfg
+from src.stats import BinaryAcc
 from src.utils import TimeRange
+from src.visualisation import metadata_to_str
+from torch import Tensor
+from train import apply_dali_pipe_kwargs
 
 app = typer.Typer()
 
@@ -91,60 +85,6 @@ def gather_ml_binary_accuracy(workspace: Annotated[Path, typer.Option()] = Path.
 
     db_handle.commit()
     db_handle.con.close()
-
-
-def transform_soft_iou_to_db_format(data: pd.DataFrame) -> dict[str, float | int]:
-    """
-    Grab the last iteration from the parquet data and transform to database dictionary input format.
-    For the multi-frame minimap experiments, since the next frame is 3.0 sec, we also add this to
-    common results table.
-    """
-    iteration = data["iteration"].max()
-    average = data.query(f"iteration == {iteration}").mean()
-    transformed = {"iteration": int(iteration)}
-    parquet_2_db = {
-        "soft_iou_self": "self",
-        "soft_iou_self_3.0": "self",
-        "soft_iou_enemy": "enemy",
-        "soft_iou_enemy_3.0": "enemy",
-        "motion_soft_iou_self": "motion_self",
-        "motion_soft_iou_enemy": "motion_enemy",
-    }
-    for pq_key, db_key in parquet_2_db.items():
-        if pq_key in average:
-            transformed[db_key] = average[pq_key].item()
-    return transformed
-
-
-@app.command()
-def gather_minimap_soft_iou(workspace: Annotated[Path, typer.Option()] = Path.cwd()):
-    """Gather soft iou for each of the minimap experiments and save to analysis table"""
-    update_database(
-        workspace, "sqlite", f'{{"path": "{workspace / DEFAULT_FILENAME}"}}'
-    )
-
-    db_handle = SQLiteDB(workspace / DEFAULT_FILENAME)
-    table_name = "next_frame_soft_iou"
-    db_handle.create_table(
-        table_name,
-        {
-            "iteration": "INTEGER",
-            "self": "FLOAT",
-            "enemy": "FLOAT",
-            "motion_self": "FLOAT",
-            "motion_enemy": "FLOAT",
-        },
-    )
-
-    for exp_run in filter(lambda x: x.is_dir(), workspace.iterdir()):
-        parquet_filename = exp_run / "val_minimap-soft-iou.parquet"
-        if not parquet_filename.exists():
-            continue
-        data: pd.DataFrame = pq.read_table(parquet_filename).to_pandas()
-        results = transform_soft_iou_to_db_format(data)
-        db_handle.write(table_name, exp_run.name, results)
-
-    db_handle.commit()
 
 
 # -------------------------------------------------------------------
@@ -220,9 +160,8 @@ def evaluate_percent(
     exp_config, model, _ = setup_eval_model_and_dataloader(
         run_path, batch_size=batch_size, workers=workers
     )
-
-    apply_dali_pipe_kwargs(exp_config, 4, 3, 3)
-
+    if exp_config.data[0].train_loader.type == "DALI":
+        apply_dali_pipe_kwargs(exp_config, 4, 3, 3)
     dataloader = get_dataloader_with_metadata(exp_config)
 
     binary_acc = BinaryAcc.from_config(exp_config)
@@ -300,7 +239,7 @@ def evaluate_all(
     workspace: Annotated[Path, typer.Option()],
     outdir: Annotated[str, typer.Option()],
     batch_size: Annotated[Optional[int], typer] = None,
-    workers: Annotated[Optional[int], typer.Option()] = 4,
+    workers: Annotated[int, typer.Option()] = 4,
     dali_py_workers: Annotated[int, typer.Option()] = 2,
     dali_external_prefetch: Annotated[int, typer.Option()] = 2,
     dali_pipe_prefetch: Annotated[int, typer.Option()] = 2,
@@ -390,50 +329,6 @@ def evaluate_all_percent(
 
 @app.command()
 @torch.inference_mode()
-def visualise_minimap_forecast(
-    run_path: Annotated[Path, typer.Option()],
-    workers: Annotated[int, typer.Option()] = 4,
-    batch_size: Annotated[int, typer.Option()] = 16,
-    split: Annotated[Split, typer.Option()] = Split.VAL,
-    n_samples: Annotated[int, typer.Option()] = 16,
-):
-    """Write images or minimap forecast for konduct review image viewer."""
-    exp_config, model, dataloader = setup_eval_model_and_dataloader(
-        run_path, split=split, workers=workers, batch_size=batch_size
-    )
-
-    model_cfg: MinimapModelCfg = get_model_config(exp_config)
-
-    if model_cfg.future_len > 1:
-        step_sec = get_dataset_properties(exp_config)["step_sec"]
-        timepoints = [float(i * step_sec) for i in range(1, model_cfg.future_len + 1)]
-    else:
-        timepoints = None
-
-    random.seed(0)  # Fix random seed for time_idx sampling
-
-    outdir = exp_config.exp_path / "images"
-    outdir.mkdir(exist_ok=True)
-    with LivePbar(total=n_samples, desc="Generating Minimap Predictions...") as pbar:
-        for sample_ in dataloader:
-            sample: dict[str, Tensor] = sample_[0]
-            preds: Tensor = model(sample)
-            write_minimap_forecast_results(
-                preds, sample, outdir, timepoints, model_cfg.target
-            )
-            pbar.update(preds.shape[0])
-            if pbar.n >= n_samples:
-                break
-
-    with open(outdir / "samples.txt", "r", encoding="utf-8") as f:
-        filenames = f.readlines()
-    filenames = sorted(set(filenames))
-    with open(outdir / "samples.txt", "w", encoding="utf-8") as f:
-        f.write("".join(filenames))
-
-
-@app.command()
-@torch.inference_mode()
 def single_replay_analysis(
     run_path: Annotated[Path, typer.Option()],
     workers: Annotated[int, typer.Option()] = 4,
@@ -488,7 +383,3 @@ def single_replay_analysis_all(
         except RuntimeError as err:
             print(f"Failed to run experiment {item.stem} with error: {err}")
         print(f"Finished {idx} of {len(experiments)} experiments")
-
-
-if __name__ == "__main__":
-    app()

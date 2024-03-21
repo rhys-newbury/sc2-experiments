@@ -1,3 +1,3 @@
-from . import base_dataset, dali_aug
+from . import base_dataset, dali_aug, dali_dataset, torch_dataset
 
-__all__ = ["base_dataset", "dali_aug"]
+__all__ = ["base_dataset", "dali_aug", "dali_dataset", "torch_dataset"]

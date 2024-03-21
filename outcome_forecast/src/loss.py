@@ -5,12 +5,13 @@ from dataclasses import dataclass
 import torch
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model_config
+from konductor.data import get_dataset_properties
 from konductor.losses import LossConfig, REGISTRY
 from torch import nn, Tensor
 from torch.nn import functional as F
 
 from .utils import get_valid_sequence_mask
-from .model.minimap_forecast import MinimapTarget, BaseConfig as MinimapModelCfg
+from .minimap.common import MinimapTarget, BaseConfig as MinimapModelCfg
 
 
 class WinBCE(nn.Module):
@@ -52,14 +53,24 @@ class MinimapLoss(nn.Module):
     """
 
     def __init__(
-        self, history_len: int, motion_weight: float | None, target: MinimapTarget
+        self,
+        history_len: int,
+        motion_weight: float | None,
+        motion_version: int,
+        target_ch: list[int],
+        pred_is_logit: bool,
     ) -> None:
         super().__init__()
         self.history_len = history_len
         self.motion_weight = motion_weight
-        self.target = target
+        self.target_ch = target_ch
+        self.pred_is_logit = pred_is_logit
         if self.motion_weight is not None:
             assert self.motion_weight > 1, f"{motion_weight=}"
+        self._get_motion_weight = [
+            self._get_motion_weight_v1,
+            self._get_motion_weight_v2,
+        ][motion_version - 1]
 
     @property
     def _key(self) -> str:
@@ -70,25 +81,36 @@ class MinimapLoss(nn.Module):
         """Returns pixel-wise loss between preds and target"""
         raise NotImplementedError()
 
-    def _get_motion_weight(self, prev: Tensor, nxt: Tensor) -> Tensor:
-        """Calculate pixel-wise motion weighting factor to emphasise loss"""
+    def _get_motion_weight_v1(self, minimaps: Tensor) -> Tensor:
+        """
+        Calculate pixel-wise motion weight based on a change between two frames
+        """
         assert self.motion_weight is not None
-        mask = torch.ones_like(prev)
+        prev = minimaps[:, self.history_len - 1 : -1]
+        nxt = minimaps[:, self.history_len :]
+        mask = torch.ones_like(nxt)
         mask[prev != nxt] = self.motion_weight
         return mask
+
+    def _get_motion_weight_v2(self, minimaps: Tensor) -> Tensor:
+        """
+        Calculate pixel-wise motion weight based on if that pixel has been
+        occupied for the entire sequence duration
+        """
+        assert self.motion_weight is not None
+        not_static_units = torch.sum(minimaps, dim=1) != minimaps.shape[1]
+        mask = torch.ones_like(minimaps[:, 0])
+        mask[not_static_units] = self.motion_weight
+        return mask.unsqueeze(1)
 
     def forward(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> dict[str, Tensor]:
-        target_minimap = targets["minimap_features"][
-            :, :, MinimapTarget.indices(self.target)
-        ]
-        next_minimap = target_minimap[:, self.history_len :]
-        loss_mask = self._loss_fn(predictions, next_minimap)
+        target_minimap = targets["minimap_features"][:, :, self.target_ch]
+        loss_mask = self._loss_fn(predictions, target_minimap[:, self.history_len :])
 
         if self.motion_weight is not None:
-            prev_minimap = target_minimap[:, self.history_len - 1 : -1]
-            loss_mask *= self._get_motion_weight(prev_minimap, next_minimap)
+            loss_mask *= self._get_motion_weight(target_minimap)
 
         loss_sequence = loss_mask.mean(dim=(-1, -2, -3))
 
@@ -102,14 +124,20 @@ class MinimapLoss(nn.Module):
 @dataclass
 class MinimapCfg(LossConfig):
     history_len: int
+    pred_is_logit: bool
+    target_ch: list[int]
     motion_weight: float | None = None
-    target: MinimapTarget = MinimapTarget.BOTH
+    motion_version: int = 1
 
     @classmethod
     def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
-        model_cfg: MinimapModelCfg = get_model_config(config=config)
+        model_cfg: MinimapModelCfg = get_model_config(config)
+        minimap_layers: list[str] = get_dataset_properties(config)["minimap_ch_names"]
         config.criterion[idx].args["history_len"] = model_cfg.history_len
-        config.criterion[idx].args["target"] = model_cfg.target
+        config.criterion[idx].args["target_ch"] = [
+            minimap_layers.index(n) for n in MinimapTarget.names(model_cfg.target)
+        ]
+        config.criterion[idx].args["pred_is_logit"] = model_cfg.is_logit_output
         return super().from_config(config, idx, **kwargs)
 
 
@@ -119,7 +147,9 @@ class MinimapBCE(MinimapLoss):
         return "minimap-bce"
 
     def _loss_fn(self, preds: Tensor, target: Tensor) -> Tensor:
-        return F.binary_cross_entropy_with_logits(preds, target, reduction="none")
+        if self.pred_is_logit:
+            return F.binary_cross_entropy_with_logits(preds, target, reduction="none")
+        return F.binary_cross_entropy(preds, target, reduction="none")
 
 
 @dataclass
@@ -151,9 +181,11 @@ class MinimapFocal(MinimapLoss):
         alpha: float,
         gamma: float,
         motion_weight: float | None,
-        target: MinimapTarget,
+        target_ch: list[int],
+        pred_is_logit: bool,
     ) -> None:
-        super().__init__(history_len, motion_weight, target)
+        assert pred_is_logit is False, "Focal loss incompatible with sigmoid output"
+        super().__init__(history_len, motion_weight, target_ch, pred_is_logit)
         self.alpha = alpha
         self.gamma = gamma
 
