@@ -15,13 +15,12 @@ from konductor.metadata.database.sqlite import DEFAULT_FILENAME, SQLiteDB
 from konductor.metadata.loggers import AverageMeter
 from konductor.models import get_model_config
 from konductor.utilities.metadata import update_database
-from konductor.utilities.pbar import LivePbar
 from pyarrow import parquet as pq
+from src.baseline.minimap import EVAL_BATCH_SIZE
 from src.data.base_dataset import SC2DatasetCfg
-from src.eval_helpers import setup_eval_model_and_dataloader
+from src.eval_helpers import get_pbar, setup_eval_model_and_dataloader
 from src.stats import MinimapModelCfg, MinimapSoftIoU
 from src.visualisation import write_minimap_forecast_results
-from src.baseline.minimap import EVAL_BATCH_SIZE
 from torch import Tensor
 
 app = typer.Typer()
@@ -115,6 +114,7 @@ def make_sequence_2_table(db_handle: SQLiteDB):
 def run(
     run_path: Annotated[Path, typer.Option()],
     workers: Annotated[int, typer.Option()] = 4,
+    live_pbar: Annotated[bool, typer.Option()] = False,
 ):
     """Re-run evaluation with a model and write the results to the common database"""
     with closing(SQLiteDB(run_path.parent / DEFAULT_FILENAME)) as db_handle:
@@ -128,7 +128,7 @@ def run(
     metric = MinimapSoftIoU.from_config(exp_config)
     meter = AverageMeter()
 
-    with LivePbar(total=len(dataloader), desc="Evaluating") as pbar:
+    with get_pbar(total=len(dataloader), desc="Evaluating", live=live_pbar) as pbar:
         for sample in dataloader:
             sample = sample[0]
             preds = model(sample)
@@ -147,6 +147,7 @@ def run(
 def run_all(
     workspace: Annotated[Path, typer.Option()],
     workers: Annotated[int, typer.Option()] = 4,
+    live_pbar: Annotated[bool, typer.Option()] = False,
 ):
     """Re-run evaluation over all experiments in workspace and write to database"""
     with closing(SQLiteDB(workspace / DEFAULT_FILENAME)) as db_handle:
@@ -166,7 +167,7 @@ def run_all(
     exps = list(filter(run_filt, workspace.iterdir()))
     for idx, exp in enumerate(exps, 1):
         try:
-            run(exp, workers)
+            run(exp, workers, live_pbar)
         except Exception as err:
             print(f"Failed {exp.name} with error: {err}")
         else:

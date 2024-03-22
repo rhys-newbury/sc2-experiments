@@ -8,6 +8,14 @@ from torch import nn, Tensor
 from konductor.data import Split, get_dataset_config
 from konductor.init import ExperimentInitConfig
 from konductor.models import get_model
+from konductor.utilities.pbar import LivePbar, IntervalPbar
+
+
+def get_pbar(total: int, desc: str = "", live: bool = True):
+    """Get live or interval (fraction=0.1) progress bar depending on live flag"""
+    return (
+        LivePbar(total, desc) if live else IntervalPbar(total, fraction=0.1, desc=desc)
+    )
 
 
 def metadata_to_str(metadata: Tensor) -> list[str]:
