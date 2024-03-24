@@ -296,6 +296,8 @@ class TransformerV2(TransformerForecasterV1):
         num_latents: int,
         latent_dim: int,
         history_len: int,
+        input_indices: list[int],
+        height_map_ch: int | None,
         latent_minimap_shape: tuple[int, int] | None,
     ) -> None:
         super().__init__(
@@ -307,11 +309,20 @@ class TransformerV2(TransformerForecasterV1):
             history_len,
             latent_minimap_shape,
         )
+        self.input_indices = input_indices
+        self.height_map_ch = height_map_ch
         self.decoder = nn.ModuleList(deepcopy(decoder) for _ in range(self.future_len))
 
     def forward(self, inputs: dict[str, Tensor]):
         """If input sequence is longer than designated, 'convolve' over input"""
-        inputs_enc = self.encode_inputs(inputs["minimap_features"])
+        minimaps = inputs["minimap_features"][:, :, self.input_indices]
+
+        if self.height_map_ch is not None:
+            minimaps[:, :, self.height_map_ch] = (
+                minimaps[:, :, self.height_map_ch] - 127
+            ) / 128
+
+        inputs_enc = self.encode_inputs(minimaps)
         inputs_enc = self.flatten_input_encodings(inputs_enc)
         latent = self.latent[None].expand(inputs_enc.shape[0], *self.latent.shape)
         temporal_feats = self.temporal(latent, inputs_enc)
@@ -327,7 +338,10 @@ class TransfomerV2Cfg(TransformerConfig):
     """Output several future timesteps by duplicating the decoder
     arch and using each duplicate for each predicted timepoint"""
 
+    target_in_layers: list[str] = field(kw_only=True)
+
     def get_instance(self, *args, **kwargs) -> Any:
+        self.encoder.args["in_ch"] = len(self.target_in_layers)
         encoder = MODEL_REGISTRY[self.encoder.type](**self.encoder.args)
         if hasattr(encoder, "disable_fpn"):
             assert encoder.disable_fpn
@@ -344,6 +358,18 @@ class TransfomerV2Cfg(TransformerConfig):
         self.decoder.args["output_dim"] = len(MinimapTarget.names(self.target))
         decoder = PosQueryDecoder(query_cfg=self.decoder_query, **self.decoder.args)
 
+        if "heightMap" in self.target_in_layers:
+            height_map_ch = self.target_in_layers.index("heightMap")
+        else:
+            height_map_ch = None
+
+        input_indices = [self.input_layer_names.index(n) for n in self.target_in_layers]
+
         return self.init_auto_filter(
-            TransformerV2, encoder=encoder, temporal=temporal, decoder=decoder
+            TransformerV2,
+            encoder=encoder,
+            temporal=temporal,
+            decoder=decoder,
+            input_indices=input_indices,
+            height_map_ch=height_map_ch,
         )
