@@ -2,6 +2,7 @@ import functools
 import operator
 from dataclasses import dataclass, field
 from typing import Any, Sequence
+from copy import deepcopy
 
 import torch
 from konductor.init import ModuleInitConfig
@@ -245,7 +246,7 @@ class TransformerForecasterV1(nn.Module):
 
 @dataclass
 @MODEL_REGISTRY.register_module("transformer-forecast-v1")
-class TransformerForecasterConfig(BaseConfig):
+class TransformerConfig(BaseConfig):
     decoder_query: ModuleInitConfig = field(kw_only=True)
     latent_minimap_shape: tuple[int, int] | None = None
     num_latents: int = field(kw_only=True)
@@ -275,4 +276,74 @@ class TransformerForecasterConfig(BaseConfig):
 
         return self.init_auto_filter(
             TransformerForecasterV1, encoder=encoder, temporal=temporal, decoder=decoder
+        )
+
+
+class TransformerV2(TransformerForecasterV1):
+    @property
+    def future_len(self):
+        return 9 - self.history_len
+
+    @property
+    def is_logit_output(self):
+        return True
+
+    def __init__(
+        self,
+        encoder: nn.Module,
+        temporal: nn.Module,
+        decoder: nn.Module,
+        num_latents: int,
+        latent_dim: int,
+        history_len: int,
+        latent_minimap_shape: tuple[int, int] | None,
+    ) -> None:
+        super().__init__(
+            encoder,
+            temporal,
+            decoder,
+            num_latents,
+            latent_dim,
+            history_len,
+            latent_minimap_shape,
+        )
+        self.decoder = nn.ModuleList(deepcopy(decoder) for _ in range(self.future_len))
+
+    def forward(self, inputs: dict[str, Tensor]):
+        """If input sequence is longer than designated, 'convolve' over input"""
+        inputs_enc = self.encode_inputs(inputs["minimap_features"])
+        inputs_enc = self.flatten_input_encodings(inputs_enc)
+        latent = self.latent[None].expand(inputs_enc.shape[0], *self.latent.shape)
+        temporal_feats = self.temporal(latent, inputs_enc)
+        output = torch.stack(
+            [decoder(temporal_feats) for decoder in self.decoder], dim=1
+        )
+        return output
+
+
+@dataclass
+@MODEL_REGISTRY.register_module("transformer-v2")
+class TransfomerV2Cfg(TransformerConfig):
+    """Output several future timesteps by duplicating the decoder
+    arch and using each duplicate for each predicted timepoint"""
+
+    def get_instance(self, *args, **kwargs) -> Any:
+        encoder = MODEL_REGISTRY[self.encoder.type](**self.encoder.args)
+        if hasattr(encoder, "disable_fpn"):
+            assert encoder.disable_fpn
+        self.temporal.args["latent_dim"] = self.latent_dim
+
+        pos_dim = (
+            8 if self.latent_minimap_shape is None else self.latent_minimap_shape[0]
+        )
+        pos_dim *= 6  # (T,H,W)*(sin,cos)
+        self.temporal.args["kv_dim"] = encoder.out_ch + pos_dim
+        temporal = MODEL_REGISTRY[self.temporal.type](**self.temporal.args)
+
+        self.decoder.args["input_dim"] = self.latent_dim
+        self.decoder.args["output_dim"] = len(MinimapTarget.names(self.target))
+        decoder = PosQueryDecoder(query_cfg=self.decoder_query, **self.decoder.args)
+
+        return self.init_auto_filter(
+            TransformerV2, encoder=encoder, temporal=temporal, decoder=decoder
         )
