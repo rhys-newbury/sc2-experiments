@@ -325,13 +325,17 @@ class ConvV2MultiConfig(ConvV2Config):
 
     last_frame_encoder: ModuleInitConfig = field(kw_only=True)
 
+    target_in_layers: list[str] | None = None
+
     @property
     def future_len(self) -> int:
-        return 3
+        return 9 - self.history_len
 
     def __post_init__(self):
-        # Subtrack two off history length as we will predict 3 frames instead
-        self.history_len -= 2
+        # Old default was to not touch this param, now we do dynamically
+        # but we have to consider the old method, this should address it
+        if self.history_len == 8:
+            self.history_len -= 2
         super().__post_init__()
 
     def get_instance(self, *args, **kwargs) -> Any:
@@ -352,21 +356,55 @@ class ConvV2MultiConfig(ConvV2Config):
         self.decoder.args["out_ch"] = len(MinimapTarget.names(self.target))
         decoder = MODEL_REGISTRY[self.decoder.type](**self.decoder.args)
 
+        height_map_ch = None
+        input_indices = None
+        if self.target_in_layers is not None:
+            if "heightMap" in self.target_in_layers:
+                height_map_ch = self.target_in_layers.index("heightMap")
+            input_indices = [
+                self.input_layer_names.index(n) for n in self.target_in_layers
+            ]
+
         return ConvForecastV2Multi(
-            encoder, temporal, decoder, last_frame_encoder, self.history_len
+            encoder,
+            temporal,
+            decoder,
+            last_frame_encoder,
+            self.history_len,
+            input_indices,
+            height_map_ch,
         )
 
 
-class ConvForecastV2Multi(ConvForecastV2):
+class ConvForecastV2Multi(nn.Module):
     """ConvV2 Minimap Forecast but 3 frames output"""
 
     @property
     def future_len(self):
-        return 3
+        return 9 - self.history_len
 
     @property
     def is_logit_output(self):
         return True
+
+    def __init__(
+        self,
+        encoder: nn.Module,
+        temporal: nn.Module,
+        decoder: nn.Module,
+        last_frame_encoder: nn.Module,
+        history_len: int,
+        input_indices: list[int] | None,
+        height_map_ch: int | None,
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.temporal_conv = temporal
+        self.decoder = decoder
+        self.last_frame_encoder = last_frame_encoder
+        self.history_len = history_len
+        self.input_indices = input_indices
+        self.hmap_ch = height_map_ch
 
     def forward_sequence(self, inputs: Tensor):
         # Squeeze and unsqueeze time dimension for siamese encoder
@@ -394,6 +432,10 @@ class ConvForecastV2Multi(ConvForecastV2):
     def forward(self, inputs: dict[str, Tensor]) -> Tensor:
         """"""
         minimaps = inputs["minimap_features"]
+        if self.input_indices is None:
+            minimaps = minimaps[:, :, self.input_indices]
+        if self.hmap_ch is not None:
+            minimaps[:, :, self.hmap_ch] = (minimaps[:, :, self.hmap_ch] - 127) / 128
 
         pred = self.forward_sequence(minimaps[:, : self.history_len])
         out: Tensor = F.interpolate(

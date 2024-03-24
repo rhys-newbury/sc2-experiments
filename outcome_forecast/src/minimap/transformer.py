@@ -310,17 +310,14 @@ class TransformerV2(TransformerForecasterV1):
             latent_minimap_shape,
         )
         self.input_indices = input_indices
-        self.height_map_ch = height_map_ch
+        self.hmap_ch = height_map_ch
         self.decoder = nn.ModuleList(deepcopy(decoder) for _ in range(self.future_len))
 
     def forward(self, inputs: dict[str, Tensor]):
         """If input sequence is longer than designated, 'convolve' over input"""
         minimaps = inputs["minimap_features"][:, :, self.input_indices]
-
-        if self.height_map_ch is not None:
-            minimaps[:, :, self.height_map_ch] = (
-                minimaps[:, :, self.height_map_ch] - 127
-            ) / 128
+        if self.hmap_ch is not None:
+            minimaps[:, :, self.hmap_ch] = (minimaps[:, :, self.hmap_ch] - 127) / 128
 
         inputs_enc = self.encode_inputs(minimaps)
         inputs_enc = self.flatten_input_encodings(inputs_enc)
