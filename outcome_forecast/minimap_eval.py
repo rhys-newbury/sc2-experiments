@@ -59,11 +59,12 @@ def transform_soft_iou_to_db_format(data: pd.DataFrame) -> dict[str, float | int
     """
     iteration = data["iteration"].max()
     average = data.query(f"iteration == {iteration}").mean()
-    transformed = {"iteration": int(iteration)}
+    transformed: dict[str, float | int] = {"iteration": int(iteration)}
 
     for pq_key, db_key in _PQ_TO_DB.items():
         if pq_key in average:
             transformed[db_key] = average[pq_key].item()
+
     return transformed
 
 
@@ -202,7 +203,9 @@ def visualise_minimap_forecast(
 
     outdir = exp_config.exp_path / "images"
     outdir.mkdir(exist_ok=True)
-    with LivePbar(total=n_samples, desc="Generating Minimap Predictions...") as pbar:
+    with get_pbar(
+        total=n_samples, desc="Generating Minimap Predictions", live=True
+    ) as pbar:
         for sample_ in dataloader:
             sample: dict[str, Tensor] = sample_[0]
             preds: Tensor = model(sample)
