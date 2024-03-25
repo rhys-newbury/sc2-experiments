@@ -8,7 +8,7 @@ import numpy as np
 
 def plot_single(data, palette, ouput_name, y_max, ylabel):
     # Create a Seaborn violin plot
-    sns.set(style="whitegrid")
+    sns.set_theme(style="whitegrid")
     plt.figure(figsize=(10, 6))
     ax = sns.violinplot(data=list(data.values()), inner="box", palette=palette)
     plt.setp(ax.collections, alpha=0.5)
