@@ -193,7 +193,9 @@ class SC2ReplayBaseConfig(SC2SamplerCfg):
 @dataclass
 @DATASET_REGISTRY.register_module("sc2-replay-outcome")
 class SC2ReplayConfig(SC2ReplayBaseConfig):
-    timepoints: TimeRange = TimeRange(0, 30, 2)  # Minutes
+    timepoints: TimeRange = field(
+        default_factory=lambda: TimeRange(0, 30, 2)
+    )  # Minutes
     min_game_time: float = 5.0  # Minutes
 
     def __post_init__(self):

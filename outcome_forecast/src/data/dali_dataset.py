@@ -128,7 +128,7 @@ class DaliFolderDataset(BaseDALIDataset):
 class DaliFolderDatasetConfig(SC2FolderCfg):
     train_loader: DaliLoaderConfig
     val_loader: DaliLoaderConfig
-    keys: list[str] = field(kw_only=True)  # List of items to read
+    features: list[str] = field(kw_only=True)  # List of items to read
     fp16_out: bool = False
     prefetch_queue_depth: int = 4
     file_suffix: str = ""
@@ -158,12 +158,12 @@ class DaliFolderDatasetConfig(SC2FolderCfg):
         loader = self.train_loader if split is Split.TRAIN else self.val_loader
         pipeline = sc2_data_pipeline(
             source=self._make_source(split),
-            keys=self.keys,
+            keys=self.features,
             fp16_out=self.fp16_out,
             **loader.pipe_kwargs(),
         )
         size = self._get_size(split)
-        return loader.get_instance(pipeline, out_map=self.keys, size=size)
+        return loader.get_instance(pipeline, out_map=self.features, size=size)
 
 
 class DaliReplayClipDataset(BaseDALIDataset):
