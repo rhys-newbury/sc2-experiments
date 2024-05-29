@@ -1,23 +1,28 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Sequence
 
+import torch
 import yaml
 from konductor.data import (
     DatasetConfig,
     DatasetInitConfig,
     ModuleInitConfig,
+    Registry,
     make_from_init_config,
 )
 from sc2_replay_reader import get_database_and_parser
+from sc2_replay_reader.sampler import BasicSampler, SQLSampler
+
+SAMPLER_REGISTRY = Registry("replay-sampler")
+SAMPLER_REGISTRY.register_module("sql", SQLSampler)
+SAMPLER_REGISTRY.register_module("basic", BasicSampler)
 
 
 @dataclass
 class SC2DatasetCfg(DatasetConfig):
     """Basic Dataset Configuration"""
 
-    features: list[str] = field(
-        default_factory=lambda: ["scalar_features", "minimap_features"]
-    )
+    features: list[str] = field(default_factory=lambda: ["scalars", "minimaps"])
     minimap_layers: list[str] | None = field(
         default_factory=lambda: ["player_relative", "visibility", "creep"]
     )
@@ -29,10 +34,22 @@ class SC2DatasetCfg(DatasetConfig):
             set(self.features)
         ), f"Duplicate keys in features: {self.features}"
 
-        if "minimap_features" in self.features:
+        # Need to remap from old keys
+        try:
+            idx = self.features.index("scalar_features")
+            self.features[idx] = "scalars"
+        except ValueError:
+            pass
+        try:
+            idx = self.features.index("minimap_features")
+            self.features[idx] = "minimaps"
+        except ValueError:
+            pass
+
+        if "minimaps" in self.features:
             _, parser = get_database_and_parser(
-                parse_units="unit_features" in self.features,
-                parse_minimaps="minimap_features" in self.features,
+                parse_units="units" in self.features,
+                parse_minimaps="minimaps" in self.features,
             )
             if self.minimap_layers is not None:
                 parser.setMinimapFeatures(self.minimap_layers)
@@ -41,7 +58,7 @@ class SC2DatasetCfg(DatasetConfig):
     @property
     def properties(self) -> dict[str, Any]:
         ret = {"scalar_ch": 28}
-        if "minimap_features" in self.features:
+        if "minimaps" in self.features:
             assert self.minimap_ch_names is not None
             ret["image_ch"] = len(self.minimap_ch_names)
         ret.update(self.__dict__)
@@ -93,3 +110,21 @@ class SC2FolderCfg(SC2DatasetCfg):
     def properties(self) -> dict[str, Any]:
         """Get properties from original generated version"""
         return self._gen_properties
+
+
+def find_closest_indices(options: Sequence[int], targets: Sequence[int]):
+    """
+    Find the closest option corresponding to a target, if there is no match, place -1
+    """
+    tgt_idx = 0
+    nearest = torch.full([len(targets)], -1, dtype=torch.int32)
+    for idx, (prv, nxt) in enumerate(zip(options, options[1:])):
+        if prv > targets[tgt_idx]:  # not in between, skip
+            tgt_idx += 1
+        elif prv <= targets[tgt_idx] <= nxt:
+            nearest[tgt_idx] = idx
+            nearest[tgt_idx] += (targets[tgt_idx] - prv) > (nxt - targets[tgt_idx])
+            tgt_idx += 1
+        if tgt_idx == nearest.nelement():
+            break
+    return nearest

@@ -232,7 +232,7 @@ class TransformerForecasterV1(nn.Module):
 
     def forward(self, inputs: dict[str, Tensor]):
         """If input sequence is longer than designated, 'convolve' over input"""
-        minimaps = inputs["minimap_features"]
+        minimaps = inputs["minimaps"]
         ntime = minimaps.shape[1]
         preds: list[Tensor] = []
         for start_idx in range(ntime - self.history_len):
@@ -315,7 +315,7 @@ class TransformerV2(TransformerForecasterV1):
 
     def forward(self, inputs: dict[str, Tensor]):
         """If input sequence is longer than designated, 'convolve' over input"""
-        minimaps = inputs["minimap_features"][:, :, self.input_indices]
+        minimaps = inputs["minimaps"][:, :, self.input_indices]
         if self.hmap_ch is not None:
             minimaps[:, :, self.hmap_ch] = (minimaps[:, :, self.hmap_ch] - 127) / 128
 

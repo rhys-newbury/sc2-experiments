@@ -98,16 +98,14 @@ class ResiduleConvV1(nn.Module):
 
     def forward(self, inputs: dict[str, Tensor]):
         """"""
-        minimaps = inputs["minimap_features"][:, : self.history_len, self.in_layers]
+        minimaps = inputs["minimaps"][:, : self.history_len, self.in_layers]
         minimap_stack = minimaps.reshape(
             -1, self.history_len * len(self.in_layers), *minimaps.shape[-2:]
         )
         residule = self.model(minimap_stack)
         residule = F.tanh(residule)
 
-        last_minimap = inputs["minimap_features"][
-            :, self.history_len - 1, self.out_layers
-        ]
+        last_minimap = inputs["minimaps"][:, self.history_len - 1, self.out_layers]
         # Ensure prediction between 0 and 1 and unsqueeze time dimension
         prediction = torch.clamp(last_minimap + residule, 0, 1).unsqueeze(1)
         return prediction
@@ -198,7 +196,7 @@ class ResiduleConvV2(nn.Module):
         return nn.Sequential(*block)
 
     def forward(self, inputs: dict[str, Tensor]):
-        minimaps = inputs["minimap_features"][:, : self.history_len, self.in_layers]
+        minimaps = inputs["minimaps"][:, : self.history_len, self.in_layers]
         size = minimaps.shape[-2:]
         residule: Tensor = minimaps.reshape(
             -1, self.history_len * len(self.in_layers), *size
@@ -207,7 +205,7 @@ class ResiduleConvV2(nn.Module):
             residule = block(residule)
         residule = F.tanh(residule)
 
-        last_minimap = inputs["minimap_features"][
+        last_minimap = inputs["minimaps"][
             :, self.history_len - 1, None, self.out_layers
         ]
         residule = residule.reshape(-1, self.future_len, len(self.out_layers), *size)
@@ -351,13 +349,13 @@ class ResiduleUnet(nn.Module):
         return out
 
     def forward(self, inputs: dict[str, Tensor]):
-        minimaps = inputs["minimap_features"][:, : self.history_len, self.in_layers]
+        minimaps = inputs["minimaps"][:, : self.history_len, self.in_layers]
         # Flatten to B[TC]HW
         minimaps = minimaps.reshape(
             -1, self.history_len * len(self.in_layers), *minimaps.shape[-2:]
         )
         if self.height_map_idx is not None:
-            heightmap = inputs["minimap_features"][:, 0, [self.height_map_idx]]
+            heightmap = inputs["minimaps"][:, 0, [self.height_map_idx]]
             heightmap = (heightmap - 127) / 128  # Normalize 0-255 -> ~[-1,1]
             minimaps = torch.cat([minimaps, heightmap], dim=1)
         residules = self.forward_aux(minimaps)
@@ -365,9 +363,7 @@ class ResiduleUnet(nn.Module):
         if self.disable_residule:
             return residules[0] if len(residules) == 1 else residules
 
-        last_minimap = inputs["minimap_features"][
-            :, self.history_len - 1, self.out_layers
-        ]
+        last_minimap = inputs["minimaps"][:, self.history_len - 1, self.out_layers]
 
         preds: list[Tensor] = []
         for residule in residules:

@@ -14,11 +14,11 @@ from konductor.data import (
     ModuleInitConfig,
     Split,
 )
-from konductor.data.dali import DALI_AUGMENTATIONS, DaliLoaderConfig, DALIExternalSource
+from konductor.data.dali import DALI_AUGMENTATIONS, DALIExternalSource, DaliLoaderConfig
 from nvidia.dali import fn
 from nvidia.dali.data_node import DataNode
 from nvidia.dali.pipeline import pipeline_def
-from nvidia.dali.types import BatchInfo, DALIDataType, SampleInfo
+from nvidia.dali.types import DALIDataType
 from sc2_replay_reader import (
     ReplayDatabase,
     ReplayParser,
@@ -26,11 +26,15 @@ from sc2_replay_reader import (
     set_replay_database_logger_level,
     spdlog_lvl,
 )
+from sc2_replay_reader.sampler import ReplaySampler
 from torch import Tensor
 
-from .base_dataset import SC2FolderCfg, SC2SamplerCfg
-from .replay_sampler import SAMPLER_REGISTRY, ReplaySampler
-from .utils import find_closest_indices
+from .base_dataset import (
+    SC2FolderCfg,
+    SC2SamplerCfg,
+    SAMPLER_REGISTRY,
+    find_closest_indices,
+)
 
 
 def _min_to_game_step(t: float):
@@ -39,6 +43,8 @@ def _min_to_game_step(t: float):
 
 
 class DaliFolderDataset(DALIExternalSource):
+    """Data source for folder full of preprocessed numpy files"""
+
     def __init__(
         self,
         path: Path,
@@ -116,6 +122,8 @@ class DaliFolderDataset(DALIExternalSource):
 @dataclass
 @DATASET_REGISTRY.register_module("dali-folder")
 class DaliFolderDatasetConfig(SC2FolderCfg):
+    """Configuration for numpy folder dataset"""
+
     train_loader: DaliLoaderConfig
     val_loader: DaliLoaderConfig
     fp16_out: bool = False
@@ -157,6 +165,8 @@ class DaliFolderDatasetConfig(SC2FolderCfg):
 
 
 class DaliReplayClipDataset(DALIExternalSource):
+    """Data source for loading clips from a replay file"""
+
     def __init__(
         self,
         sampler_cfg: ModuleInitConfig,
@@ -200,8 +210,8 @@ class DaliReplayClipDataset(DALIExternalSource):
     def _post_init(self):
         self.sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](**self.sampler_cfg.args)
         self.db_handle, self.parser = get_database_and_parser(
-            parse_units="unit_features" in self.features,
-            parse_minimaps="minimap_features" in self.features,
+            parse_units="units" in self.features,
+            parse_minimaps="minimaps" in self.features,
         )
         if self.minimap_layers is not None:
             self.parser.setMinimapFeatures(self.minimap_layers)
@@ -355,6 +365,8 @@ class DaliReplayClipDataset(DALIExternalSource):
 @dataclass
 @DATASET_REGISTRY.register_module("dali-replay-clip")
 class DaliReplayClipConfig(SC2SamplerCfg):
+    """Dataset configuration for loading clips from a replay file"""
+
     train_loader: DaliLoaderConfig
     val_loader: DaliLoaderConfig
     start_min: float = 0
@@ -400,7 +412,7 @@ class DaliReplayClipConfig(SC2SamplerCfg):
     def _make_source(self, split: Split) -> DaliReplayClipDataset:
         loader = self.train_loader if split is Split.TRAIN else self.val_loader
         sampler_cfg = deepcopy(self.sampler_cfg)
-        sampler_cfg.args["split"] = split
+        sampler_cfg.args["is_train"] = split is Split.TRAIN
         sampler_cfg.args["train_ratio"] = self.train_ratio
         sampler_cfg.args["replays_path"] = self.basepath
         source = self.init_auto_filter(
@@ -443,8 +455,8 @@ _DTYPES = {
     "win": FeatureType(DALIDataType.FLOAT, 0, "", False),
     "valid": FeatureType(DALIDataType.BOOL, 1, "", False),
     "metadata": FeatureType(DALIDataType.UINT8, 1, "", False),
-    "scalar_features": FeatureType(DALIDataType.FLOAT, 2, "", False),
-    "minimap_features": FeatureType(DALIDataType.FLOAT, 4, "FCHW", True),
+    "scalars": FeatureType(DALIDataType.FLOAT, 2, "", False),
+    "minimaps": FeatureType(DALIDataType.FLOAT, 4, "FCHW", True),
 }
 
 
@@ -493,7 +505,7 @@ def sc2_data_pipeline(
         return data
 
     if len(augmentations) != 0:
-        minimap_idx = keys.index("minimap_features")
+        minimap_idx = keys.index("minimaps")
         outputs[minimap_idx] = apply_minimap_augs(
             outputs[minimap_idx].gpu(), augmentations
         )

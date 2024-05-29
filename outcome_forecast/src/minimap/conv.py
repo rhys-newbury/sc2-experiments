@@ -199,7 +199,7 @@ class ConvForecast(nn.Module):
 
     def forward(self, inputs: dict[str, Tensor]) -> Tensor:
         """"""
-        minimaps = inputs["minimap_features"]
+        minimaps = inputs["minimaps"]
         ntime = minimaps.shape[1]
         preds: list[Tensor] = []
         for start_idx in range(ntime - self.history_len):
@@ -301,7 +301,7 @@ class ConvForecastV2(nn.Module):
 
     def forward(self, inputs: dict[str, Tensor]) -> Tensor:
         """"""
-        minimaps = inputs["minimap_features"]
+        minimaps = inputs["minimaps"]
         ntime = minimaps.shape[1]
         preds: list[Tensor] = []
         for start_idx in range(ntime - self.history_len):
@@ -431,7 +431,7 @@ class ConvForecastV2Multi(nn.Module):
 
     def forward(self, inputs: dict[str, Tensor]) -> Tensor:
         """"""
-        minimaps = inputs["minimap_features"]
+        minimaps = inputs["minimaps"]
         if self.input_indices is None:
             minimaps = minimaps[:, :, self.input_indices]
         if self.hmap_ch is not None:

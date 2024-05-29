@@ -15,9 +15,9 @@ from sklearn.model_selection import KFold, cross_val_score
 from sklearn.neural_network import MLPClassifier
 from torch.utils.data import DataLoader
 from typing_extensions import Annotated
+from sc2_replay_reader.sampler import SQLSampler
 
-from ..data.torch_dataset import SC2ReplayOutcome
-from ..data.replay_sampler import Split, SQLSampler
+from ..data.torch_dataset import SC2ReplayOutcome, Split
 from ..utils import TimeRange
 
 try:
@@ -82,7 +82,7 @@ def fit_model(
         0.8,
         Split.TRAIN,
     )
-    dataset = SC2ReplayOutcome(sampler, time, {"scalar_features"})
+    dataset = SC2ReplayOutcome(sampler, time, ["scalars"])
 
     dataloader = DataLoader(dataset, batch_size=8, num_workers=workers)
 
@@ -104,7 +104,7 @@ def fit_model(
                     file = tmp_workspace / f"{time_step}_x.npy"
                     wins = tmp_workspace / f"{time_step}_y.npy"
                     mask_ = sample["valid"][:, time_step]
-                    x = sample["scalar_features"][:, time_step, :][mask_, :]
+                    x = sample["scalars"][:, time_step, :][mask_, :]
                     y = sample["win"][mask_]
 
                     if mask_.sum() == 0:

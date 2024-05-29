@@ -2,8 +2,8 @@ dataset:
   - type: sc2-replay
     args:
       features:
-        - minimap_features
-        - scalar_features
+        - minimaps
+        - scalars
       timepoints:
         min: 2
         max: 30

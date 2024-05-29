@@ -75,9 +75,7 @@ def evaluate_trivial_prediction(dataset: SC2DatasetCfg) -> dict[str, float]:
                 sample = sample[0]
 
             # Prediction is last minimap of history length
-            prediction: Tensor = sample["minimap_features"][
-                :, history_len - 1, None, target_ch
-            ]
+            prediction: Tensor = sample["minimaps"][:, history_len - 1, None, target_ch]
             # This is repeated for the future forecasts
             prediction = prediction.repeat(1, future_len, 1, 1, 1)
             result = evaluator(prediction, sample)

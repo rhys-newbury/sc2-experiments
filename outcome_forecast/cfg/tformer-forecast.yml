@@ -5,7 +5,7 @@ dataset:
       end_min: 120
       step_sec: 3
       clip_len: 8
-      features: ["minimap_features"]
+      features: [minimaps]
       yields_batch: true
       train_ratio: 0.99
       precalculated_clips: true

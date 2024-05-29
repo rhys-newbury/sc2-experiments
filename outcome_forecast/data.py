@@ -12,7 +12,7 @@ import typer
 import yaml
 import pandas as pd
 from pyarrow import parquet as pq
-from konductor.data import make_from_init_config
+from konductor.data import make_from_init_config, Split
 from konductor.init import DatasetInitConfig
 from konductor.registry import Registry
 from konductor.utilities.pbar import IntervalPbar, LivePbar
@@ -21,10 +21,9 @@ from sc2_replay_reader import (
     spdlog_lvl,
     ReplayDataScalarOnlyDatabase,
 )
-from src.data.base_dataset import Split
-from src.data.utils import find_closest_indices
+from sc2_replay_reader.sampler import SQLSampler
+from src.data.base_dataset import find_closest_indices
 from src.utils import StrEnum
-from src.data.replay_sampler import SQLSampler
 from torch import Tensor
 
 try:
@@ -149,9 +148,9 @@ def convert_minimaps_to_videos(
         for sample_ in dataloader:
             sample = sample_[0] if isinstance(sample_, list) else sample_
             outpath: Path = outfolder / (sample["metadata"][0] + ".mp4")
-            sz = sample["minimap_features"].shape[-2:]
+            sz = sample["minimaps"].shape[-2:]
             with VideoWriter(outpath, "h264", 6, sz) as w:
-                writer(sample["minimap_features"][0], w)
+                writer(sample["minimaps"][0], w)
             pbar.update(1)
 
 

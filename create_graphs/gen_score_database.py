@@ -1,14 +1,13 @@
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import typer
+from summaryStats import SQL_TYPES, LambdaFunctionType, SC2Replay
 from tqdm import tqdm
 from typing_extensions import Annotated
-
-from summaryStats import SQL_TYPES, LambdaFunctionType, SC2Replay
 
 app = typer.Typer()
 

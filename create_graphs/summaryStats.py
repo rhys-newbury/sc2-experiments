@@ -2,8 +2,6 @@ from pathlib import Path
 from typing import Callable, Dict, Literal, Tuple
 
 import torch
-from torch.utils.data import Dataset
-from utils import upper_bound
 from sc2_replay_reader import (
     GAME_INFO_FILE,
     ReplayDataScalarOnlyDatabase,
@@ -11,6 +9,8 @@ from sc2_replay_reader import (
     set_replay_database_logger_level,
     spdlog_lvl,
 )
+from torch import Tensor
+from torch.utils.data import Dataset
 
 SQL_TYPES = Literal["INTEGER", "FLOAT", "TEXT", "BOOLEAN"]
 ENUM_KEYS = {"playerRace", "playerResult"}
@@ -94,3 +94,10 @@ class SC2Replay(Dataset):
     def __iter__(self):
         for index in range(len(self)):
             yield self[index]
+
+
+def upper_bound(x: Tensor, value: float) -> int:
+    """
+    Find the index of the last element which is less or equal to value
+    """
+    return int(torch.argwhere(torch.le(x, value))[-1].item())

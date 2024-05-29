@@ -89,13 +89,13 @@ class SnapshotPredictor(nn.Module):
         # Merge batch and time dimension for minimaps
         feats: list[Tensor] = []
         if self.image_enc is not None:
-            feats.append(self.image_enc(step_data["minimap_features"].flatten(0, 1)))
+            feats.append(self.image_enc(step_data["minimaps"].flatten(0, 1)))
 
         if self.scalar_enc is not None:
             # Process scalar features per timestep
             scalar_feats = [
-                self.scalar_enc(step_data["scalar_features"][:, tidx])
-                for tidx in range(step_data["scalar_features"].shape[1])
+                self.scalar_enc(step_data["scalars"][:, tidx])
+                for tidx in range(step_data["scalars"].shape[1])
             ]
             # Make same shape as image feats
             feats.append(torch.stack(scalar_feats, dim=1).flatten(0, 1))
@@ -142,17 +142,17 @@ class SequencePredictor(nn.Module):
 
     def forward(self, step_data: dict[str, Tensor]) -> Tensor:
         """"""
-        batch_sz, n_timestep = step_data["scalar_features"].shape[:2]
+        batch_sz, n_timestep = step_data["scalars"].shape[:2]
         feats: list[Tensor] = []
         if self.image_enc is not None:
             # Merge batch and time dimension for minimaps
-            image_feats = self.image_enc(step_data["minimap_features"].flatten(0, 1))
+            image_feats = self.image_enc(step_data["minimaps"].flatten(0, 1))
             feats.append(image_feats.reshape(batch_sz, n_timestep, -1))
 
         if self.scalar_enc is not None:
             # Process scalar features per timestep
             scalar_feats = [
-                self.scalar_enc(step_data["scalar_features"][:, tidx])
+                self.scalar_enc(step_data["scalars"][:, tidx])
                 for tidx in range(n_timestep)
             ]
             # Make same shape as image feats
@@ -164,7 +164,7 @@ class SequencePredictor(nn.Module):
         all_feats = self.dropout(all_feats)
 
         if isinstance(self.decoder, TransformerDecoderV1):
-            outputs = self.decoder(all_feats, step_data["scalar_features"][..., -1])
+            outputs = self.decoder(all_feats, step_data["scalars"][..., -1])
         else:
             outputs = self.decoder(all_feats)
 

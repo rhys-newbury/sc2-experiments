@@ -5,7 +5,7 @@ dataset:
       end_min: 20
       step_sec: 3
       clip_len: 8
-      features: [minimap_features]
+      features: [minimaps]
       yields_batch: true
       precalculated_clips: true
       sampler_cfg:

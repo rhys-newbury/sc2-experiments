@@ -346,7 +346,7 @@ class MinimapSoftIoU(Statistic):
     def __call__(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> Dict[str, float | Tensor]:
-        target_minimaps = targets["minimap_features"][:, :, self.target_ch]
+        target_minimaps = targets["minimaps"][:, :, self.target_ch]
         next_minimap = target_minimaps[:, self.sequence_len :]
         static_unit_mask = torch.sum(target_minimaps, dim=1) != target_minimaps.shape[1]
         diff_frame_mask = target_minimaps[:, [self.sequence_len - 1]] != next_minimap
