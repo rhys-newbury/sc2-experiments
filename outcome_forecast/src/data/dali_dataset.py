@@ -14,7 +14,7 @@ from konductor.data import (
     ModuleInitConfig,
     Split,
 )
-from konductor.data.dali import DALI_AUGMENTATIONS, DaliLoaderConfig
+from konductor.data.dali import DALI_AUGMENTATIONS, DaliLoaderConfig, DALIExternalSource
 from nvidia.dali import fn
 from nvidia.dali.data_node import DataNode
 from nvidia.dali.pipeline import pipeline_def
@@ -30,7 +30,7 @@ from torch import Tensor
 
 from .base_dataset import SC2FolderCfg, SC2SamplerCfg
 from .replay_sampler import SAMPLER_REGISTRY, ReplaySampler
-from .utils import BaseDALIDataset, find_closest_indices
+from .utils import find_closest_indices
 
 
 def _min_to_game_step(t: float):
@@ -38,7 +38,7 @@ def _min_to_game_step(t: float):
     return int(t * 22.4 * 60)
 
 
-class DaliFolderDataset(BaseDALIDataset):
+class DaliFolderDataset(DALIExternalSource):
     def __init__(
         self,
         path: Path,
@@ -49,18 +49,10 @@ class DaliFolderDataset(BaseDALIDataset):
         num_shards: int,
         random_shuffle: bool,
         yields_batch: bool = False,
-        prefetch_queue_depth: int = 2,
         file_suffix: str = "",
         load_other_player: bool = False,
     ) -> None:
-        super().__init__(
-            batch_size,
-            shard_id,
-            num_shards,
-            random_shuffle,
-            yields_batch,
-            prefetch_queue_depth,
-        )
+        super().__init__(batch_size, shard_id, num_shards, random_shuffle, yields_batch)
         self.split = split
         self.features = features
         self.folder = path / split.name.lower()
@@ -72,24 +64,22 @@ class DaliFolderDataset(BaseDALIDataset):
 
         self.files: list[str] = []
 
-    def _initialize(self):
+    def _post_init(self):
         file_list = (
             self.folder.parent / f"{self.split.lower()}-list{self.file_suffix}.txt"
         )
         with open(file_list, "r", encoding="utf-8") as f:
             self.files = [s.strip() for s in f.readlines()]
-        return super()._initialize()
+        super()._post_init()
 
     def __len__(self) -> int:
         return len(self.files)
 
-    def __call__(self, sample_info: SampleInfo):
-        sample_idx = super().__call__(sample_info)
-
-        data = np.load(self.folder / self.files[sample_idx], allow_pickle=True)
+    def get_data(self, index: int):
+        data = np.load(self.folder / self.files[index], allow_pickle=True)
         if self.load_other_player:
-            base_name = self.files[sample_idx][:-5]
-            alt_idx = int(self.files[sample_idx][-5]) % 2 + 1
+            base_name = self.files[index][:-5]
+            alt_idx = int(self.files[index][-5]) % 2 + 1
             other_data = np.load(
                 self.folder / f"{base_name}{alt_idx}.npz", allow_pickle=True
             )
@@ -118,7 +108,7 @@ class DaliFolderDataset(BaseDALIDataset):
                         x.append(np.concatenate((d, other_data[k]), axis=1))
                 out_data = tuple(x)
         except BadZipFile as e:
-            raise RuntimeError(f"Got bad data from {self.files[sample_idx]}") from e
+            raise RuntimeError(f"Got bad data from {self.files[index]}") from e
 
         return out_data
 
@@ -128,7 +118,6 @@ class DaliFolderDataset(BaseDALIDataset):
 class DaliFolderDatasetConfig(SC2FolderCfg):
     train_loader: DaliLoaderConfig
     val_loader: DaliLoaderConfig
-    features: list[str] = field(kw_only=True)  # List of items to read
     fp16_out: bool = False
     prefetch_queue_depth: int = 4
     file_suffix: str = ""
@@ -151,22 +140,23 @@ class DaliFolderDatasetConfig(SC2FolderCfg):
 
     def _get_size(self, split: Split):
         inst = self._make_source(split)
-        inst._initialize()
+        inst._post_init()
         return inst.num_iterations * inst.batch_size
 
     def get_dataloader(self, split: Split) -> Any:
         loader = self.train_loader if split is Split.TRAIN else self.val_loader
         pipeline = sc2_data_pipeline(
             source=self._make_source(split),
+            source_prefetch=self.prefetch_queue_depth,
             keys=self.features,
             fp16_out=self.fp16_out,
             **loader.pipe_kwargs(),
         )
         size = self._get_size(split)
-        return loader.get_instance(pipeline, out_map=self.features, size=size)
+        return loader.get_instance(pipeline, output_map=self.features, size=size)
 
 
-class DaliReplayClipDataset(BaseDALIDataset):
+class DaliReplayClipDataset(DALIExternalSource):
     def __init__(
         self,
         sampler_cfg: ModuleInitConfig,
@@ -180,7 +170,6 @@ class DaliReplayClipDataset(BaseDALIDataset):
         num_shards: int,
         random_shuffle: bool,
         yields_batch: bool = False,
-        prefetch_queue_depth: int = 2,
         metadata: bool = False,
         minimap_layers: list[str] | None = None,
         valid_clip_file: Path | None = None,
@@ -191,7 +180,6 @@ class DaliReplayClipDataset(BaseDALIDataset):
             num_shards,
             random_shuffle,
             yields_batch,
-            prefetch_queue_depth,
         )
         self.sampler_cfg = sampler_cfg
         self.sampler: ReplaySampler | None = None
@@ -209,7 +197,7 @@ class DaliReplayClipDataset(BaseDALIDataset):
         self.yields_batch = yields_batch
         self.valid_indices: None | np.ndarray = None
 
-    def _initialize(self):
+    def _post_init(self):
         self.sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](**self.sampler_cfg.args)
         self.db_handle, self.parser = get_database_and_parser(
             parse_units="unit_features" in self.features,
@@ -218,10 +206,10 @@ class DaliReplayClipDataset(BaseDALIDataset):
         if self.minimap_layers is not None:
             self.parser.setMinimapFeatures(self.minimap_layers)
         set_replay_database_logger_level(spdlog_lvl.warn)
-        return super()._initialize()
+        return super()._post_init()
 
     def __len__(self) -> int:
-        assert self.sampler is not None, "Must be _initialized()"
+        assert self.sampler is not None, "Must be _post_init()"
         return len(self.sampler)
 
     def sample_start_time(self, game_steps: list[int]) -> int:
@@ -336,13 +324,12 @@ class DaliReplayClipDataset(BaseDALIDataset):
 
         return outputs
 
-    def __call__(self, sample_info: SampleInfo | BatchInfo):
+    def get_data(self, index: int):
         assert self.sampler is not None
         assert self.db_handle is not None
         assert self.parser is not None
         # LSP doesn't recognise 'assert all(m is not None for m in ...)'
-        sample_idx = super().__call__(sample_info)
-        replay_file, replay_idx = self.sampler.sample(sample_idx)
+        replay_file, replay_idx = self.sampler.sample(index)
         if not self.db_handle.load(replay_file):
             raise FileNotFoundError(replay_file)
         replay_data = self.db_handle.getEntry(replay_idx)
@@ -416,16 +403,14 @@ class DaliReplayClipConfig(SC2SamplerCfg):
         sampler_cfg.args["split"] = split
         sampler_cfg.args["train_ratio"] = self.train_ratio
         sampler_cfg.args["replays_path"] = self.basepath
-        pipe_kwargs = loader.pipe_kwargs()
-        del pipe_kwargs["prefetch_queue_depth"]  # Use config specific key
         source = self.init_auto_filter(
-            DaliReplayClipDataset, sampler_cfg=sampler_cfg, **pipe_kwargs
+            DaliReplayClipDataset, sampler_cfg=sampler_cfg, **loader.pipe_kwargs()
         )
         return source
 
     def _get_size(self, split: Split):
         inst = self._make_source(split)
-        inst._initialize()
+        inst._post_init()
         return inst.num_iterations * inst.batch_size
 
     def get_dataloader(self, split: Split) -> Any:
@@ -436,13 +421,14 @@ class DaliReplayClipConfig(SC2SamplerCfg):
 
         pipeline = sc2_data_pipeline(
             source=self._make_source(split),
+            source_prefetch=self.prefetch_queue_depth,
             keys=features,
             fp16_out=self.fp16_out,
             **loader.pipe_kwargs(),
         )
         size = self._get_size(split)
 
-        return loader.get_instance(pipeline, out_map=features, size=size)
+        return loader.get_instance(pipeline, output_map=features, size=size)
 
 
 @dataclass
@@ -474,7 +460,8 @@ def sc2_data_pipeline(
     shard_id: int,
     num_shards: int,
     random_shuffle: bool,
-    source: BaseDALIDataset,
+    source: DALIExternalSource,
+    source_prefetch: int,
     keys: list[str],
     fp16_out: bool,
     augmentations: list[ModuleInitConfig],
@@ -489,7 +476,7 @@ def sc2_data_pipeline(
         dtype=[_DTYPES[k].dtype for k in keys],
         ndim=[_DTYPES[k].ndim for k in keys],
         layout=[_DTYPES[k].layout for k in keys],
-        prefetch_queue_depth=source.prefetch_queue_depth,
+        prefetch_queue_depth=source_prefetch,
     )
 
     def transform(data: DataNode, key: str):

@@ -1,12 +1,8 @@
 import sqlite3
-from abc import ABC, abstractmethod
-from logging import getLogger
 from pathlib import Path
 from typing import Sequence
 
-import numpy as np
 import torch
-from nvidia.dali.types import BatchInfo, SampleInfo
 from torch import Tensor
 
 
@@ -55,72 +51,3 @@ def gen_val_query(database: Path, sql_filters: list[str] | None):
         except sqlite3.OperationalError as e:
             raise AssertionError("Invalid SQL Syntax") from e
     return sql_query
-
-
-class BaseDALIDataset(ABC):
-    """External Iterator for DALI"""
-
-    def __init__(
-        self,
-        batch_size: int,
-        shard_id: int,
-        num_shards: int,
-        random_shuffle: bool,
-        yields_batch: bool = False,
-        prefetch_queue_depth: int = 2,
-    ) -> None:
-        self.logger = getLogger(type(self).__name__)
-        self.shard_id = shard_id
-        self.batch_size = batch_size
-        self.num_shards = num_shards
-        self.random_shuffle = random_shuffle
-        self.idx_samples: np.ndarray = np.zeros(0, dtype=np.int64)
-        self.last_seen_epoch = -1
-        self.yields_batch = yields_batch
-        self.prefetch_queue_depth = prefetch_queue_depth
-
-    def _initialize(self):
-        self.idx_samples = np.arange(len(self), dtype=np.int64)
-
-    @abstractmethod
-    def __len__(self) -> int:
-        """Number of samples in dataset"""
-
-    def __getstate__(self):
-        return self.__dict__.copy()
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        self._initialize()
-
-    @property
-    def num_iterations(self):
-        _num_iter = len(self) // self.num_shards
-        if not self.yields_batch:
-            _num_iter //= self.batch_size
-        return _num_iter
-
-    def resample_indices(self, epoch_idx: int):
-        self.last_seen_epoch = epoch_idx
-        self.idx_samples = np.random.default_rng(seed=42 + epoch_idx).permutation(
-            len(self)
-        )
-
-    def __call__(self, yield_info: SampleInfo | BatchInfo) -> int:
-        if len(self) == 0:
-            self._initialize()
-
-        if yield_info.iteration >= self.num_iterations:
-            raise StopIteration
-
-        if self.random_shuffle and yield_info.epoch_idx != self.last_seen_epoch:
-            self.resample_indices(yield_info.epoch_idx)
-
-        idx = self.shard_id
-        idx += (
-            yield_info.idx_in_epoch
-            if isinstance(yield_info, SampleInfo)
-            else yield_info.iteration
-        )
-
-        return self.idx_samples[idx].item()
