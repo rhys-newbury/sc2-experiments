@@ -5,9 +5,9 @@ dataset:
       end_min: 120
       step_sec: 3
       clip_len: 8
-      features: ["minimap_features"]
+      features: [minimaps]
+      minimap_layers: [player_relative, heightMap]
       yields_batch: true
-      train_ratio: 0.99
       precalculated_clips: true
       sampler_cfg:
         type: sql
@@ -28,7 +28,7 @@ dataset:
       type: DALI
       args:
         shuffle: true
-        batch_size: 64
+        batch_size: 96
         drop_last: true
         augmentations:
           - type: permute-dims # FCHW -> FHWC
@@ -43,16 +43,18 @@ dataset:
             args:
               dst: [0, 3, 1, 2]
 criterion:
-  - type: minimap-focal
+  - type: minimap-bce
     args:
-      gamma: 2.0
-      alpha: 0.8
+      motion_weight: 2
 model:
-  - type: transformer-forecast-v1
+  - type: transformer-v2
     args:
+      target: self
       num_latents: 32
       latent_dim: 128
+      history_len: 6
       latent_minimap_shape: [6, 6]
+      target_in_layers: [heightMap, self, enemy]
       encoder:
         type: image-fpn
         args:
@@ -74,25 +76,16 @@ model:
         type: ""
         args:
           num_heads: 4
-          output_dim: 2
           out_shape: [128, 128]
     optimizer:
       type: adamw
       args:
-        step_interval: 1
-        lr: 1.e-5
+        lr: 1.e-4
         gradient_clipping: 0.01
       scheduler:
         type: poly
         args:
-          max_iter: 100
+          max_iter: 10
           power: 0.9
 logger:
   interval: 1000
-trainer:
-  amp: {}
-  validation_interval: 10000
-checkpointer:
-  mode: iteration
-  latest: 10000
-  extra: 50000
