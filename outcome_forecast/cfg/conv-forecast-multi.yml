@@ -1,11 +1,12 @@
 dataset:
   - type: dali-replay-clip
     args:
-      start_min: 2
-      end_min: 20
+      start_min: 0
+      end_min: 120
       step_sec: 3
       clip_len: 8
-      features: [minimap_features]
+      features: [minimaps]
+      minimap_layers: [player_relative, heightMap]
       yields_batch: true
       precalculated_clips: true
       sampler_cfg:
@@ -27,7 +28,7 @@ dataset:
       type: DALI
       args:
         shuffle: true
-        batch_size: 64
+        batch_size: 96
         drop_last: true
         augmentations:
           - type: permute-dims # FCHW -> FHWC
@@ -48,7 +49,9 @@ criterion:
 model:
   - type: conv-forecast-v2-multiframe
     args:
-      target: both
+      target: self
+      history_len: 6
+      target_in_layers: [heightMap, self, enemy]
       encoder:
         type: image-fpn
         args:
@@ -63,7 +66,7 @@ model:
           hidden_ch: 32
           out_ch: 32
       decoder:
-        type: temporal-conv-multi-out
+        type: temporal-conv-decoder
         args:
           n_layers: 1
           hidden_ch: 32

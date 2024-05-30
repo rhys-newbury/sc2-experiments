@@ -5,7 +5,7 @@ dataset:
       end_min: 20
       step_sec: 3
       clip_len: 8
-      features: [minimap_features]
+      features: [minimaps]
       yields_batch: true
       precalculated_clips: true
       sampler_cfg:
@@ -53,26 +53,26 @@ model:
         type: image-fpn
         args:
           disable_fpn: true
-          hidden_chs: [16, 32, 64, 96]
-          strides: [1, 2, 2, 2]
-          paddings: [1, 1, 1, 1]
+          hidden_chs: [8, 16]
+          strides: [1, 2]
+          paddings: [1, 1]
       temporal:
         type: temporal-conv
         args:
-          hidden_ch: 32
-          out_ch: 32
+          hidden_ch: 16
+          out_ch: 16
       decoder:
         type: aspp-decoder
         args:
-          hidden_ch: 32
+          hidden_ch: 16
           rates: [3, 6, 9]
       last_frame_encoder:
         type: image-fpn
         args:
           disable_fpn: true
-          hidden_chs: [16, 32]
-          strides: [1, 2]
-          paddings: [1, 1]
+          hidden_chs: [8]
+          strides: [1]
+          paddings: [1]
     optimizer:
       type: adamw
       args:
