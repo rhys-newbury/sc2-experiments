@@ -6,7 +6,6 @@ dataset:
       step_sec: 3
       clip_len: 8
       features: [minimaps]
-      minimap_layers: [player_relative, heightMap]
       yields_batch: true
       precalculated_clips: true
       sampler_cfg:

@@ -126,7 +126,7 @@ def fit_model(
     with pbar_type(**pbar_kwargs) as pbar:
         for data in x:
             valid = data["valid"][:, ts_index]
-            valid_data = data["scalar_features"][valid, ts_index, :]
+            valid_data = data["scalars"][valid, ts_index, :]
 
             if valid.sum() > 1:
                 output_tensor[idx : idx + valid.sum(), :] = valid_data

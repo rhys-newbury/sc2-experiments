@@ -106,7 +106,7 @@ class MinimapLoss(nn.Module):
     def forward(
         self, predictions: Tensor, targets: dict[str, Tensor]
     ) -> dict[str, Tensor]:
-        target_minimap = targets["minimap_features"][:, :, self.target_ch]
+        target_minimap = targets["minimaps"][:, :, self.target_ch]
         loss_mask = self._loss_fn(predictions, target_minimap[:, self.history_len :])
 
         if self.motion_weight is not None:

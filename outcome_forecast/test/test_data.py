@@ -3,8 +3,8 @@
 import os
 from pathlib import Path
 
-from src.data.base_dataset import SC2ReplayOutcome, Split, TimeRange
-from src.data.replay_sampler import SQLSampler
+from src.data.torch_dataset import SC2ReplayOutcome, TimeRange
+from sc2_replay_reader.sampler import SQLSampler
 
 
 def test_iterating():
@@ -18,13 +18,13 @@ def test_iterating():
             "number_game_step > 1024",
             "playerAPM > 100",
         ],
-        0.8,
-        Split.TRAIN,
+        train_ratio=0.8,
+        is_train=True,
     )
     dataset = SC2ReplayOutcome(
         sampler,
         TimeRange(2, 30, 0.5),
-        features={"minimap_features", "scalar_features"},
+        features=["minimaps", "scalars"],
     )
     for idx, sample in enumerate(dataset):
         if idx == 100:

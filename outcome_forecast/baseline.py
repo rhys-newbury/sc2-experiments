@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import typer
 
-from src.baseline import fit, fit_numpy, minimap
+from src.baseline import minimap, outcome, outcome_numpy
 
 app = typer.Typer()
-app.add_typer(fit.app, name="fit")
-app.add_typer(fit_numpy.app, name="fit-numpy")
+app.add_typer(outcome.app, name="outcome")
+app.add_typer(outcome_numpy.app, name="outcome-numpy")
 app.add_typer(minimap.app, name="minimap")
 
 if __name__ == "__main__":

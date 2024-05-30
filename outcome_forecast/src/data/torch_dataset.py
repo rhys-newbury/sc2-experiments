@@ -9,16 +9,23 @@ import torch
 from konductor.data import DATASET_REGISTRY, Split
 from konductor.data._pytorch.dataloader import DataloaderV1Config
 from sc2_replay_reader import Result, get_database_and_parser
-from torch import Tensor
+from sc2_replay_reader.sampler import ReplaySampler
 from torch.utils.data import Dataset
 
 from ..utils import TimeRange
-from .base_dataset import SC2FolderCfg, SC2SamplerCfg
-from .replay_sampler import SAMPLER_REGISTRY, ReplaySampler
-from .utils import find_closest_indices
+from .base_dataset import (
+    SAMPLER_REGISTRY,
+    SC2FolderCfg,
+    SC2SamplerCfg,
+    find_closest_indices,
+)
 
 
 class SC2ReplayBase(Dataset):
+    """Standard Base StarCraft II Pytorch Dataset
+    Should be inherited from with `process_replay` overwritten with what you want to do.
+    """
+
     def __init__(
         self,
         sampler: ReplaySampler,
@@ -33,8 +40,8 @@ class SC2ReplayBase(Dataset):
         self.logger = logging.getLogger("replay-dataset")
         if features is not None:
             self.db_handle, self.parser = get_database_and_parser(
-                parse_units="unit_features" in features,
-                parse_minimaps="minimap_features" in features,
+                parse_units="units" in features,
+                parse_minimaps="minimaps" in features,
             )
         else:
             self.db_handle, self.parser = get_database_and_parser(
@@ -67,6 +74,8 @@ class SC2ReplayBase(Dataset):
 
 
 class SC2ReplayOutcome(SC2ReplayBase):
+    """StarCraftII dataset geared towards outcome prediction"""
+
     def __init__(
         self,
         sampler: ReplaySampler,
@@ -128,40 +137,6 @@ class SC2ReplayOutcome(SC2ReplayBase):
         return outputs
 
 
-class SC2MinimapSequence(SC2ReplayBase):
-    def __init__(
-        self,
-        sampler: ReplaySampler,
-        timediff_sec: float,
-        features: list[str],
-        minimap_layers: list[str] | None = None,
-        metadata: bool = False,
-    ):
-        super().__init__(sampler, features, minimap_layers, metadata)
-        self.timediff_sec = timediff_sec
-
-    def process_replay(self):
-        tgt_indices: list[int] = [0]
-        last_step = self.parser.data.gameStep[0]
-        for idx, step in enumerate(self.parser.data.gameStep[1:], 1):
-            last_sec = (step - last_step) * 22.4
-            if last_sec > self.timediff_sec:
-                prev_step = self.parser.data.gameStep[idx - 1]
-                last_last_sec = (prev_step - last_step) * 22.4
-                if last_sec < -last_last_sec:
-                    tgt_indices.append(idx)
-                    last_step = step
-                else:
-                    tgt_indices.append(idx - 1)
-                    last_step = prev_step
-
-        minimaps: list[Tensor] = []
-        for idx in tgt_indices:
-            sample = self.parser.sample(idx)["minimap_features"]
-            minimaps.append(torch.as_tensor(sample))
-        return {"minimap_features": torch.stack(minimaps)}
-
-
 @dataclass
 class SC2ReplayBaseConfig(SC2SamplerCfg):
     # Dataloader type we want to use
@@ -192,7 +167,9 @@ class SC2ReplayBaseConfig(SC2SamplerCfg):
 
 @dataclass
 @DATASET_REGISTRY.register_module("sc2-replay-outcome")
-class SC2ReplayConfig(SC2ReplayBaseConfig):
+class OutcomeDatasetConfig(SC2ReplayBaseConfig):
+    """Configuration for outcome dataset"""
+
     timepoints: TimeRange = field(
         default_factory=lambda: TimeRange(0, 30, 2)
     )  # Minutes
@@ -205,15 +182,6 @@ class SC2ReplayConfig(SC2ReplayBaseConfig):
 
     def get_cls(self):
         return SC2ReplayOutcome
-
-
-@dataclass
-@DATASET_REGISTRY.register_module("minimap-sequence")
-class MinimapSequence(SC2ReplayBaseConfig):
-    timediff_sec: float = field(kw_only=True)
-
-    def get_cls(self):
-        return SC2MinimapSequence
 
 
 class FolderDataset(Dataset):
@@ -248,6 +216,8 @@ class FolderDataset(Dataset):
 @dataclass
 @DATASET_REGISTRY.register_module("folder-dataset")
 class FolderDatasetConfig(SC2FolderCfg):
+    """Configuration for pre-processed numpy file dataset"""
+
     # Dataloader type we want to use
     train_loader: DataloaderV1Config
     val_loader: DataloaderV1Config

@@ -1,7 +1,7 @@
 dataset:
   - type: dali-folder
     args:
-      keys: [win, valid, minimap_features, scalar_features]
+      keys: [win, valid, minimaps, scalars]
     val_loader:
       type: DALI
       args:

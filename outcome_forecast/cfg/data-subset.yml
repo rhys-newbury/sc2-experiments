@@ -2,8 +2,8 @@
 type: sc2-replay-outcome
 args:
   features:
-    - minimap_features
-    - scalar_features
+    - minimaps
+    - scalars
   timepoints:
     min: 2
     max: 20
@@ -13,12 +13,10 @@ args:
     args:
       database: $ENV:gamedata.db
       filter_query:
-        [
-          "game_length > 6720",
-          "read_success = 1",
-          "parse_success = 1",
-          "playerAPM > 30",
-        ]
+        - game_length > 6720
+        - read_success = 1
+        - parse_success = 1
+        - playerAPM > 30
 val_loader:
   type: PYTORCH_V1
   args:

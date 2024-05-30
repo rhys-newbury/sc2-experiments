@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from tqdm import tqdm
 from sc2_replay_reader import Result
+from tqdm import tqdm
 
 # Your list of scores
 # data = [

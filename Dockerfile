@@ -20,14 +20,14 @@ ENV LD_PRELOAD=/opt/zlib-ng/libz.so.1.3.0.zlib-ng
 
 RUN pip install scikit-learn xgboost matplotlib sc2reader wandb
 
-RUN pip install git+https://github.com/5had3z/sc2-serializer@b09b18f
+RUN pip install git+https://github.com/5had3z/sc2-serializer@0d6781e3f4ac2af4529db4a4a22ef87c981a6837
 
 WORKDIR /app
 
 RUN mkdir database_tools && cd database_tools && \
     wget https://raw.githubusercontent.com/5had3z/sc2-serializer/main/scripts/replay_sql.py
 
-RUN pip install git+https://github.com/5had3z/konductor@f2bbb63
+RUN pip install git+https://github.com/5had3z/konductor@93f117a7db290046450155c23f6805b43e5e1269
 
 ARG COMMIT
 RUN [ ! -z "${COMMIT}" ]

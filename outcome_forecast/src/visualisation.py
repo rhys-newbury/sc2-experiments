@@ -165,7 +165,7 @@ def write_minimap_forecast_results(
         metadata = [m + str(i) for i, m in enumerate(metadata)]
 
     layer_idxs = [ch_names.index(n) for n in MinimapTarget.names(out_type)]
-    targets = data["minimap_features"][:, :, layer_idxs]
+    targets = data["minimaps"][:, :, layer_idxs]
     history_len = targets.shape[1] - preds.shape[1]
 
     for bidx in range(preds.shape[0]):

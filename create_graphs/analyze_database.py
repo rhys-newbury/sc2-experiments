@@ -1,12 +1,13 @@
 import sqlite3
-import typer
-import numpy as np
-from typing_extensions import Annotated
-from pathlib import Path
-from sc2_replay_reader import Race, Result
-from typing import List, Any, Callable, Dict, Tuple
 from functools import reduce
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Tuple
+
 import matplotlib.pyplot as plt
+import numpy as np
+import typer
+from sc2_replay_reader import Race, Result
+from typing_extensions import Annotated
 from violin_plot import plot_single, plot_vs
 
 app = typer.Typer()

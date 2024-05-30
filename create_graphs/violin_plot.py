@@ -1,9 +1,10 @@
-import seaborn as sns
-import matplotlib.pyplot as plt
 from pathlib import Path
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from PIL import Image
+
+import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+from PIL import Image
 
 
 def plot_single(data, palette, ouput_name, y_max, ylabel):
