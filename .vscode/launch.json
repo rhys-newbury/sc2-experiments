@@ -8,7 +8,7 @@
             "name": "Visualize",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/outcome_forecast/eval.py",
+            "program": "${workspaceFolder}/forecasting/eval.py",
             "console": "integratedTerminal",
             "args": [
                 "visualise-minimap-forecast",
@@ -19,7 +19,7 @@
             "name": "Eval",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/outcome_forecast/eval.py",
+            "program": "${workspaceFolder}/forecasting/eval.py",
             "console": "integratedTerminal",
             "args": [
                 "evaluate-all",
@@ -32,17 +32,18 @@
             "name": "Train",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/outcome_forecast/train.py",
+            "program": "${workspaceFolder}/forecasting/train.py",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "cwd": "${workspaceFolder}/outcome_forecast",
+            "cwd": "${workspaceFolder}/forecasting",
             "args": [
                 "--workspace=workspace",
                 "--epoch=10",
-                "--config-file=cfg/minimap-forecast.yml",
+                "--config-file=cfg/dali-sql-folder.yml",
                 "--pbar",
-                "--brief=testing minimap forecast",
-                "--workers=3"
+                "--brief=testing outcome forecast",
+                "--workers=8",
+                "--dali-py-workers=6"
             ],
             "envFile": "${workspaceFolder}/.env"
         },

@@ -1,4 +1,5 @@
-"""Runs over a bunch of folder"""
+"""Runs conversion program over a folder of folders, basically
+the structure of a folder of tournament replay packs"""
 
 import concurrent.futures as fut
 import subprocess
@@ -13,6 +14,7 @@ app = typer.Typer()
 
 
 def make_args(game: Path, replays: Path, converter: Path, output: Path, port: int):
+    """Create list of arguments for launch SC2 conversion process"""
     return [
         str(converter.absolute()),
         f"--replays={replays}",
@@ -27,7 +29,9 @@ def run_with_redirect(tid, *args):
     """Redirect each thread stdout to log file"""
     print(f"running {tid}: {args}")
     with open(f"worker_logs_{tid}.txt", "a", encoding="utf-8") as f:
-        subprocess.run(args, stdout=io.TextIOWrapper(f.buffer, write_through=True))
+        subprocess.run(
+            args, stdout=io.TextIOWrapper(f.buffer, write_through=True), check=True
+        )
 
 
 @app.command()
@@ -38,7 +42,7 @@ def main(
     game: Annotated[Path, typer.Option()],
     n_parallel: Annotated[int, typer.Option()] = cpu_count() // 2,
 ):
-    """"""
+    """Run converter over a folder of replay pack folders in parallel"""
     assert converter.exists()
     assert game.exists()
     assert replays.exists()

@@ -1,3 +1,6 @@
+"""Compare cpu/mem usage between sc2-serializer and alphastar-unplugged"""
+
+import os
 import time
 from pathlib import Path
 
@@ -7,6 +10,11 @@ import typer
 from docker.models.containers import Container
 from matplotlib import pyplot as plt
 
+SC2_PATH = Path(os.environ.get("SC2_PATH", str(Path.home() / "SC2")))
+REPLAYS_PATH = Path(os.environ.get("DATAPATH", "/mnt/dataset"))
+ASTAR_FILENAME = "alphastar.csv"
+SC2S_FILENAME = "sc2-serializer.csv"
+
 
 def get_cpu_usage(stats) -> float:
     "returns CPU Usage as number of cores used"
@@ -15,10 +23,10 @@ def get_cpu_usage(stats) -> float:
     def cpu_diff(s, key):
         return key(s["cpu_stats"]) - key(s["precpu_stats"])
 
-    ctrUsage = cpu_diff(stats, lambda x: x["cpu_usage"]["total_usage"])
-    sysUsage = cpu_diff(stats, lambda x: x["system_cpu_usage"])
+    ctr_usage = cpu_diff(stats, lambda x: x["cpu_usage"]["total_usage"])
+    sys_usage = cpu_diff(stats, lambda x: x["system_cpu_usage"])
 
-    return ctrUsage / sysUsage * n_cpu
+    return ctr_usage / sys_usage * n_cpu
 
 
 def get_memory_usage(stats) -> float:
@@ -41,18 +49,15 @@ def run_stats(ctr: Container, logfile: Path):
         stats = ctr.stats(stream=False)
         ctr.reload()
 
-    # Suffix the file with the time taken for conversion
-    new_filename = logfile.with_stem(f"{logfile.stem}")
-    logfile.rename(new_filename)
+    print("Container finished")
 
 
 app = typer.Typer()
-SC2_PATH = Path.home() / "SC2"
-REPLAYS_PATH = Path("/media/bryce/nfs/replays")
 
 
 @app.command()
-def cpp_serializer(results: Path = Path.cwd()):
+def cpp_serializer(output: Path = Path.cwd()):
+    """Run sc2-serializer in docker container and write results file to output directory"""
     client = docker.from_env()
     ctr = client.containers.run(
         "mu00120825.eng.monash.edu.au:5000/sc2-serializer",
@@ -67,11 +72,12 @@ def cpp_serializer(results: Path = Path.cwd()):
         volumes=[f"{SC2_PATH}:/data", f"{REPLAYS_PATH}:/replays"],
         detach=True,
     )
-    run_stats(ctr, results / "sc2-serializer.csv")
+    run_stats(ctr, output / SC2S_FILENAME)
 
 
 @app.command()
-def alphastar(results: Path = Path.cwd()):
+def alphastar(output: Path = Path.cwd()):
+    """Run alphastar in docker container and write results file to output directory"""
     client = docker.from_env()
     ctr = client.containers.run(
         "mu00120825.eng.monash.edu.au:5000/smac-transformer:alphastar",
@@ -89,13 +95,14 @@ def alphastar(results: Path = Path.cwd()):
         volumes=[f"{SC2_PATH}:/data", f"{REPLAYS_PATH}:/replays"],
         detach=True,
     )
-    run_stats(ctr, results / "alphastar.csv")
+    run_stats(ctr, output / ASTAR_FILENAME)
 
 
 @app.command()
 def compare(results: Path = Path.cwd()):
-    cpp_stats = pd.read_csv(results / "sc2-serializer.csv")
-    astar_stats = pd.read_csv(results / "alphastar.csv")
+    """Compare runs between sc2-serializer and alphastar"""
+    cpp_stats = pd.read_csv(results / SC2S_FILENAME)
+    astar_stats = pd.read_csv(results / ASTAR_FILENAME)
     x_key = "Time[sec]"
     for y_key in ["MEM[MB]", "CPU[Core]"]:
         plt.plot(
@@ -121,7 +128,8 @@ def compare(results: Path = Path.cwd()):
 
 @app.command()
 def update_time(results: Path = Path.cwd()):
-    for filename in ["sc2-serializer.csv", "alphastar.csv"]:
+    """Convert time to relative rather than absolute, writes modified files with '_t' suffix"""
+    for filename in [SC2S_FILENAME, ASTAR_FILENAME]:
         filepath = results / filename
         stats = pd.read_csv(filepath)
         stats["Time[sec]"] -= stats["Time[sec]"][0]

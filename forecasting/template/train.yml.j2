@@ -30,7 +30,7 @@ spec:
                   torchrun,
                   --standalone,
                   --nproc_per_node={{ [n_gpu, 1] | max }},
-                  /app/outcome_forecast/train.py,
+                  /app/forecasting/train.py,
                   --workspace=/mnt/storage/{{ exp_type }}-experiments/{{ dataset_type }},
                   --config-file=/mnt/storage/{{ exp_type }}-experiments/config/{{ exp_config }}.yml,
                   --epoch={{ epochs }},

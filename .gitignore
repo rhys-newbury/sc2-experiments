@@ -162,7 +162,7 @@ cython_debug/
 workspace
 *.npy
 *.SC2Replays
-outcome_forecast/wandb/
+forecasting/wandb/
 *.png
 *.csv
 *.pdf

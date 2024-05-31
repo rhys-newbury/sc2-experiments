@@ -1,6 +1,5 @@
-"""
-Data transform utilities
-"""
+#!/usr/bin/env python3
+"""Data preprocessing utilities"""
 
 import os
 from pathlib import Path
@@ -164,7 +163,8 @@ def make_minimap_videos(
 ):
     """
     Reading a few frames from a SC2Replay is a bit wasteful, perhaps
-    using the native DALI videoreader could perhaps be faster.
+    using the native DALI videoreader could perhaps be faster?
+    Note: Data becomes huge, sampling small batch from same game works fine.
     """
     dataset_cfg, loaded_dict = get_dataset_config_for_data_transform(config, workers)
 
@@ -193,7 +193,7 @@ def get_valid_start_indices(game_step: list[int], stride: int, length: int):
 
 
 def sampler_from_config(conf_file: Path) -> SQLSampler:
-    """Get SQLSampler from config file"""
+    """Create SQLSampler from config file"""
     with open(conf_file, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
@@ -204,14 +204,12 @@ def sampler_from_config(conf_file: Path) -> SQLSampler:
         assert config["sampler_cfg"]["type"] == "sql"
         config = config["sampler_cfg"]["args"]
 
-    sampler = SQLSampler(
+    return SQLSampler(
         replays_path=Path(os.environ["DATAPATH"]),
-        split=Split.TRAIN,
+        is_train=True,
         train_ratio=1.0,
         **config,
     )
-
-    return sampler
 
 
 def get_partition_start_end_idx(total_len: int):
@@ -239,7 +237,10 @@ def write_valid_stride_files(
     sequence_len: Annotated[int, typer.Option()],
     live: Annotated[bool, typer.Option(help="Use live pbar")] = False,
 ):
-    """Find valid strides and write to file"""
+    """
+    Find valid strides and write to file. This can be sampled directly rather than randomly
+    sampling the replay until we find a good subsequence when dataloading.
+    """
 
     sampler = sampler_from_config(config)
 
@@ -309,14 +310,14 @@ def merge_valid_stride_files(
 
 
 @app.command()
-def mask_analysis():
-    pqfile = Path("/media/bryce/nfs/minimap-experiments/replay_mask_67_9.parquet")
+def mask_analysis(pqfile: Path, invalid_thresh: int = 48):
+    """Check how many valid subsequences exist in each replay"""
     data = pd.read_parquet(pqfile)
     intMask = data["validMasks"].map(
-        lambda x: np.frombuffer(x.encode("utf-8"), "i1") - 48
+        lambda x: np.frombuffer(x.encode("utf-8"), "i1") - invalid_thresh
     )
     numValidPerReplay = intMask.map(np.sum)
-    numInvalidReplays = numValidPerReplay[numValidPerReplay == 0].sum()
+    numInvalidReplays = numValidPerReplay[numValidPerReplay <= 0].sum()
     print(f"Number of invalid replays: {numInvalidReplays}")
 
 

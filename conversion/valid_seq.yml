@@ -25,7 +25,7 @@ spec:
                 [
                   python3,
                   -u,
-                  /app/outcome_forecast/data.py,
+                  /app/forecasting/data.py,
                   write-valid-stride-files,
                   --config=/mnt/storage/minimap-experiments/stride-mask.yml,
                   --step-sec=3,

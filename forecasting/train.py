@@ -1,3 +1,5 @@
+"""Main training entrypoint"""
+
 import logging
 import shutil
 from functools import partial

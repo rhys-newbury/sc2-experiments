@@ -22,6 +22,8 @@ VALID_GPUS = [
 
 @dataclass
 class Dataset:
+    """Association between dataset name and path"""
+
     subset: str
     path: str
 

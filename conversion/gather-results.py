@@ -11,6 +11,7 @@ app = typer.Typer()
 
 @app.command()
 def main(path: Path = Path.cwd()):
+    """Gather performance logging files and print formatted results"""
     files = sorted(filter(lambda x: x.suffix == ".csv", path.iterdir()))
 
     results = pd.DataFrame(

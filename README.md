@@ -1,5 +1,16 @@
 # sc2-experiments
-Repo contains ML experiments on SC2-serializer datasets
+Repo contains ML experiments using [sc2-serializer](https://github.com/5had3z/sc2-serializer) datasets.
+
+## Outcome Prediciton
+
+### Preprocessing
+
+
+## Minimap Forecasting
+
+### Preprocessing
+
+
 
 ### Git hooks
 The CI will run several checks on the new code pushed to the repository. These checks can also be run locally without waiting for the CI by following the steps below:
