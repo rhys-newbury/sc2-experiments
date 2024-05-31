@@ -19,14 +19,14 @@ from nvidia.dali import fn
 from nvidia.dali.data_node import DataNode
 from nvidia.dali.pipeline import pipeline_def
 from nvidia.dali.types import DALIDataType
-from sc2_replay_reader import (
+from sc2_serializer import (
     ReplayDatabase,
     ReplayParser,
     get_database_and_parser,
     set_replay_database_logger_level,
     spdlog_lvl,
 )
-from sc2_replay_reader.sampler import ReplaySampler
+from sc2_serializer.sampler import ReplaySampler
 from torch import Tensor
 
 from .base_dataset import (

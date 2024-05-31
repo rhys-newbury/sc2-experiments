@@ -15,7 +15,7 @@ from sklearn.model_selection import KFold, cross_val_score
 from sklearn.neural_network import MLPClassifier
 from torch.utils.data import DataLoader
 from typing_extensions import Annotated
-from sc2_replay_reader.sampler import SQLSampler
+from sc2_serializer.sampler import SQLSampler
 
 from ..data.torch_dataset import SC2ReplayOutcome, Split
 from ..utils import TimeRange

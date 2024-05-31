@@ -8,8 +8,8 @@ import numpy as np
 import torch
 from konductor.data import DATASET_REGISTRY, Split
 from konductor.data._pytorch.dataloader import DataloaderV1Config
-from sc2_replay_reader import Result, get_database_and_parser
-from sc2_replay_reader.sampler import ReplaySampler
+from sc2_serializer import Result, get_database_and_parser
+from sc2_serializer.sampler import ReplaySampler
 from torch.utils.data import Dataset
 
 from ..utils import TimeRange

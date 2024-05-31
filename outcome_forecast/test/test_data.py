@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from src.data.torch_dataset import SC2ReplayOutcome, TimeRange
-from sc2_replay_reader.sampler import SQLSampler
+from sc2_serializer.sampler import SQLSampler
 
 
 def test_iterating():

@@ -19,7 +19,7 @@ from konductor.trainer.pytorch import (
 )
 from konductor.utilities import comm
 from konductor.utilities.pbar import PbarType, pbar_wrapper
-from sc2_replay_reader import set_replay_database_logger_level, spdlog_lvl
+from sc2_serializer import set_replay_database_logger_level, spdlog_lvl
 from torch import Tensor
 from typing_extensions import Annotated
 from src.data.base_dataset import SC2FolderCfg

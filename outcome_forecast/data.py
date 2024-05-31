@@ -16,12 +16,12 @@ from konductor.data import make_from_init_config, Split
 from konductor.init import DatasetInitConfig
 from konductor.registry import Registry
 from konductor.utilities.pbar import IntervalPbar, LivePbar
-from sc2_replay_reader import (
+from sc2_serializer import (
     set_replay_database_logger_level,
     spdlog_lvl,
     ReplayDataScalarOnlyDatabase,
 )
-from sc2_replay_reader.sampler import SQLSampler
+from sc2_serializer.sampler import SQLSampler
 from src.data.base_dataset import find_closest_indices
 from src.utils import StrEnum
 from torch import Tensor

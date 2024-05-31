@@ -10,8 +10,8 @@ from konductor.data import (
     Registry,
     make_from_init_config,
 )
-from sc2_replay_reader import get_database_and_parser
-from sc2_replay_reader.sampler import BasicSampler, SQLSampler
+from sc2_serializer import get_database_and_parser
+from sc2_serializer.sampler import BasicSampler, SQLSampler
 
 SAMPLER_REGISTRY = Registry("replay-sampler")
 SAMPLER_REGISTRY.register_module("sql", SQLSampler)
