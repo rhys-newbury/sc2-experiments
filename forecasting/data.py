@@ -265,7 +265,7 @@ def write_valid_stride_files(
     with make_pbar(end_idx - start_idx, "Creating Masks", live) as pbar:
         for sample_idx in range(start_idx, end_idx):
             path, sidx = sampler.sample(sample_idx)
-            db.load(path)
+            assert db.load(path), f"Failed to load {path}"
             replay = db.getEntry(sidx)
             indices = get_valid_start_indices(
                 replay.data.gameStep, step_game, sequence_len
