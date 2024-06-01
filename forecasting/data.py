@@ -306,7 +306,7 @@ def create_valid_stride(
                     part,
                     live=False,
                 )
-            merge_valid_stride(output, step_sec, sequence_len)
+            merge_valid_stride(output, step_sec, sequence_len, clean=True)
         return
 
     if "POD_NAME" in os.environ:
@@ -325,6 +325,7 @@ def merge_valid_stride(
     path: Annotated[Path, typer.Option()],
     step_sec: Annotated[float, typer.Option()],
     sequence_len: Annotated[int, typer.Option()],
+    clean: Annotated[bool, typer.Option(help="Remove shards when done")] = False,
 ):
     """Merges replay mask shards to single file"""
     filestem = f"replay_mask_{int(step_sec * 22.4)}_{sequence_len}"
@@ -343,6 +344,10 @@ def merge_valid_stride(
                 data = pq.read_table(shard)
                 writer.write_table(data)
                 pbar.update(1)
+
+    if clean:
+        for f in shards:
+            f.unlink()
 
 
 @app.command()
