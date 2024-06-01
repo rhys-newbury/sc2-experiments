@@ -306,6 +306,7 @@ def create_valid_stride(
                     part,
                     live=False,
                 )
+            merge_valid_stride(output, step_sec, sequence_len)
         return
 
     if "POD_NAME" in os.environ:
