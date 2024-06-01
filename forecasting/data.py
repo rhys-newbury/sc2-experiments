@@ -296,7 +296,7 @@ def create_valid_stride(
     total_len = len(sampler_from_config(config))
     if workers > 1:
         with fut.ProcessPoolExecutor(workers) as ctx:
-            for part in get_subsequences(total_len, workers):
+            work = [
                 ctx.submit(
                     run_valid_stride_creation,
                     config,
@@ -306,7 +306,10 @@ def create_valid_stride(
                     part,
                     live=False,
                 )
-            merge_valid_stride(output, step_sec, sequence_len, clean=True)
+                for part in get_subsequences(total_len, workers)
+            ]
+            fut.wait(work)
+        merge_valid_stride(output, step_sec, sequence_len, clean=True)
         return
 
     if "POD_NAME" in os.environ:
