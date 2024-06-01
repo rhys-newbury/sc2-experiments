@@ -2,6 +2,7 @@
 """Data preprocessing utilities"""
 
 import os
+import concurrent.futures as fut
 from pathlib import Path
 from typing import Annotated, Callable
 
@@ -180,7 +181,7 @@ def make_minimap_videos(
         convert_minimaps_to_videos(outsubfolder, dataloader, live, writer_func)
 
 
-def get_valid_start_indices(game_step: list[int], stride: int, length: int):
+def get_valid_start_mask(game_step: list[int], stride: int, length: int):
     """Gather all the start indices of length with stride in a replay"""
     valid_starts = np.zeros(len(game_step), dtype=bool)
     for start_idx, start_val in enumerate(game_step):
@@ -212,80 +213,114 @@ def sampler_from_config(conf_file: Path) -> SQLSampler:
     )
 
 
-def get_partition_start_end_idx(total_len: int):
-    """Query pod index if exists, otherwise use full range"""
-    if "POD_NAME" in os.environ:
-        pod_idx = int(os.environ["POD_NAME"].split("-")[-1])
-        replicas = int(os.environ["REPLICAS"])
-        chunk_size = total_len // replicas
-        start_idx = pod_idx * chunk_size
-        if pod_idx + 1 == replicas:
-            end_idx = total_len
-        else:
-            end_idx = start_idx + chunk_size
-    else:
-        start_idx = 0
-        end_idx = total_len
-    return start_idx, end_idx
+def get_partition_range(total_len: int, part_idx: int, num_part: int):
+    """Get the range to process corresponding to the partition index"""
+    chunk_size = total_len // num_part
+    start_idx = part_idx * chunk_size
+    end_idx = total_len if part_idx + 1 == num_part else start_idx + chunk_size
+    return range(start_idx, end_idx)
+
+
+def gather_valid_stride_data(
+    sampler: SQLSampler, stride: int, sequence_len: int, live: bool, indices: range
+):
+    """Gather replays from sampler"""
+    print(f"Running over {indices.start} to {indices.stop} of {len(sampler)}")
+
+    mask_data = pd.DataFrame(
+        columns=["replayHash", "playerId", "validMask"],
+        index=indices,
+        # dtype=[("replayHash", "string"), ("playerId", "int"), ("validMask", "string")],
+        dtype="string",
+    )
+
+    db = ReplayDataScalarOnlyDatabase()
+    with make_pbar(len(indices), "Creating Masks", live) as pbar:
+        for sample_idx in indices:
+            path, sidx = sampler.sample(sample_idx)
+            assert db.load(path), f"Failed to load {path}"
+            replay = db.getEntry(sidx)
+            valid_mask = get_valid_start_mask(
+                replay.data.gameStep, stride, sequence_len
+            )
+            write_idx = sample_idx - indices.start
+            mask_data["replayHash"].iat[write_idx] = replay.header.replayHash
+            mask_data["playerId"].iat[write_idx] = str(replay.header.playerId)
+            mask_data["validMask"].iat[write_idx] = "".join(
+                str(x.item()) for x in valid_mask.astype(np.uint8)
+            )
+            pbar.update(1)
+
+    return mask_data
+
+
+def run_valid_stride_creation(
+    config: Path,
+    output: Path,
+    stride: int,
+    sequence_len: int,
+    indices: range,
+    live: bool,
+):
+    """Run valid stride creation and write to file"""
+    sampler = sampler_from_config(config)
+    mask_data = gather_valid_stride_data(sampler, stride, sequence_len, live, indices)
+
+    output /= f"replay_mask_{stride}_{sequence_len}.parquet"
+    # If shard then add shard start idx to filename
+    if indices.start != 0 or indices.stop != len(sampler):
+        output = output.with_name(f"{output.stem}_{indices.start}.parquet")
+
+    mask_data.to_parquet(output, compression=None)
+
+
+def get_subsequences(total_len: int, n_sequences: int):
+    """Get all the subseqence ranges for n_sequences"""
+    return [get_partition_range(total_len, i, n_sequences) for i in range(n_sequences)]
 
 
 @app.command()
-def write_valid_stride_files(
+def create_valid_stride(
     config: Annotated[Path, typer.Option()],
     output: Annotated[Path, typer.Option()],
     step_sec: Annotated[float, typer.Option()],
     sequence_len: Annotated[int, typer.Option()],
+    workers: Annotated[int, typer.Option()] = 1,
     live: Annotated[bool, typer.Option(help="Use live pbar")] = False,
 ):
     """
     Find valid strides and write to file. This can be sampled directly rather than randomly
     sampling the replay until we find a good subsequence when dataloading.
     """
+    stride = int(step_sec * 22.4)
+    total_len = len(sampler_from_config(config))
+    if workers > 1:
+        with fut.ProcessPoolExecutor(workers) as ctx:
+            for part in get_subsequences(total_len, workers):
+                ctx.submit(
+                    run_valid_stride_creation,
+                    config,
+                    output,
+                    stride,
+                    sequence_len,
+                    part,
+                    live=False,
+                )
+        return
 
-    sampler = sampler_from_config(config)
-
-    db = ReplayDataScalarOnlyDatabase()
-
-    step_game = int(step_sec * 22.4)
-
-    start_idx, end_idx = get_partition_start_end_idx(len(sampler))
-
-    print(f"Running over {start_idx} to {end_idx}")
-
-    replayHashes = pd.Series(
-        name="replayHashes", index=range(start_idx, end_idx), dtype=pd.StringDtype()
-    )
-    playerIds = pd.Series(
-        name="playerIds", index=range(start_idx, end_idx), dtype=pd.Int32Dtype()
-    )
-    validMasks = pd.Series(
-        name="validMasks", index=range(start_idx, end_idx), dtype=pd.StringDtype()
-    )
-
-    with make_pbar(end_idx - start_idx, "Creating Masks", live) as pbar:
-        for sample_idx in range(start_idx, end_idx):
-            path, sidx = sampler.sample(sample_idx)
-            assert db.load(path), f"Failed to load {path}"
-            replay = db.getEntry(sidx)
-            indices = get_valid_start_indices(
-                replay.data.gameStep, step_game, sequence_len
-            )
-            write_idx = sample_idx - start_idx
-            replayHashes.iloc[write_idx] = replay.header.replayHash
-            playerIds.iloc[write_idx] = replay.header.playerId
-            validMasks.iloc[write_idx] = "".join(
-                str(x.item()) for x in indices.astype(np.uint8)
-            )
-
-            pbar.update(1)
-
-    output /= f"replay_mask_{step_game}_{sequence_len}_{start_idx}_{end_idx}.parquet"
-    mask_data = pd.concat([replayHashes, playerIds, validMasks], axis=1)
-    mask_data.to_parquet(output, compression=None)
+    if "POD_NAME" in os.environ:
+        part = get_partition_range(
+            total_len,
+            int(os.environ["POD_NAME"].split("-")[-1]),
+            int(os.environ["REPLICAS"]),
+        )
+    else:
+        part = range(total_len)
+    run_valid_stride_creation(config, output, stride, sequence_len, part, live)
 
 
 @app.command()
-def merge_valid_stride_files(
+def merge_valid_stride(
     path: Annotated[Path, typer.Option()],
     step_sec: Annotated[float, typer.Option()],
     sequence_len: Annotated[int, typer.Option()],
@@ -297,7 +332,7 @@ def merge_valid_stride_files(
         raise FileNotFoundError(f"No shards matching {filestem} in {path}")
 
     # Sort by start index of shard
-    shards = sorted(shards, key=lambda p: int(p.stem.split("_")[4]))
+    shards = sorted(shards, key=lambda p: int(p.stem.split("_")[-1]))
 
     schema = pq.read_schema(shards[0])
 

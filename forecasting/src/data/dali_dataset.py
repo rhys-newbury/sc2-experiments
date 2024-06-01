@@ -255,8 +255,8 @@ class DaliReplayClipDataset(DALIExternalSource):
         assert self.valid_clip_file is not None
         assert self.parser is not None
         filters = [
-            ("replayHashes", "==", self.parser.info.replayHash),
-            ("playerIds", "==", self.parser.info.playerId),
+            ("replayHash", "==", self.parser.info.replayHash),
+            ("playerId", "==", self.parser.info.playerId),
         ]
         valid_data = pd.read_parquet(self.valid_clip_file, filters=filters)
         if valid_data.size == 0:
@@ -264,7 +264,7 @@ class DaliReplayClipDataset(DALIExternalSource):
                 f"Can't find replayHash {self.parser.info.replayHash} and "
                 f"playerId {self.parser.info.playerId} in {self.valid_clip_file}"
             )
-        mask_data = np.frombuffer(valid_data.iloc[0].validMasks.encode("utf-8"), "i1")
+        mask_data = np.frombuffer(valid_data["validMask"].iat[0].encode("utf-8"), "i1")
         self.valid_indices = np.argwhere(mask_data == ord("1"))
         if self.valid_indices.size == 0:
             raise ValueError(
@@ -312,14 +312,16 @@ class DaliReplayClipDataset(DALIExternalSource):
         )
 
     def process_replay(self, sample_indices: Tensor):
-        assert self.parser is not None
-        try:
-            test_sample: dict[str, Any] = self.parser.sample(0)
-        except (RuntimeError, IndexError) as err:
-            raise RuntimeError(f"Parse failure for {self.parser.info}") from err
+        """Load self.features from numpy file at sample_indices
 
-        feature_keys = test_sample.keys() if self.features is None else self.features
-        outputs_list = {k: [] for k in feature_keys}
+        Args:
+            sample_indicies (Tensor): indices to sample from the replay
+
+        Returns
+            list[np.ndarray]: Sampled data from the replay in order of self.features
+        """
+        assert self.parser is not None
+        outputs_list = {k: [] for k in self.features}
 
         for idx in sample_indices:
             sample = self.parser.sample(int(idx.item()))
