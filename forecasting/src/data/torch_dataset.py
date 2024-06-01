@@ -139,7 +139,8 @@ class SC2ReplayOutcome(SC2ReplayBase):
 
 @dataclass
 class SC2ReplayBaseConfig(SC2SamplerCfg):
-    # Dataloader type we want to use
+    """Pytorch Variant of SC2 Dataloader"""
+
     train_loader: DataloaderV1Config
     val_loader: DataloaderV1Config
 
@@ -148,7 +149,7 @@ class SC2ReplayBaseConfig(SC2SamplerCfg):
 
     def get_dataloader(self, split: Split) -> Any:
         sampler = SAMPLER_REGISTRY[self.sampler_cfg.type](
-            split=split,
+            is_train=split is Split.TRAIN,
             train_ratio=self.train_ratio,
             replays_path=self.basepath,
             **self.sampler_cfg.args,
