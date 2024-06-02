@@ -20,7 +20,7 @@ ENV LD_PRELOAD=/opt/zlib-ng/libz.so.1.3.0.zlib-ng
 
 RUN pip install scikit-learn xgboost matplotlib sc2reader wandb
 
-RUN pip install git+https://github.com/5had3z/sc2-serializer@0d6781e3f4ac2af4529db4a4a22ef87c981a6837
+RUN pip install git+https://github.com/5had3z/sc2-serializer@fd7afb085cf6dbcfbb7a006ed9fdd16650b2539e
 
 WORKDIR /app
 
