@@ -85,6 +85,14 @@ def convert_to_numpy_files(outfolder: Path, dataloader, live: bool):
             pbar.update(1)
 
 
+def write_numpy_file_list(folder: Path):
+    """Write newline separated filenames inside folder to
+    parent directory as {folder.stem}-list.txt"""
+    filelines = [f"{f.name}\n" for f in folder.iterdir()]
+    with open(folder.parent / f"{folder.stem}-list.txt", "w", encoding="utf-8") as f:
+        f.writelines(filelines)
+
+
 @app.command()
 def make_numpy_subset(
     config: Annotated[Path, typer.Option()],
@@ -115,6 +123,7 @@ def make_numpy_subset(
         outsubfolder = output / split.name.lower()
         outsubfolder.mkdir(exist_ok=True)
         convert_to_numpy_files(outsubfolder, dataloader, live)
+        write_numpy_file_list(outsubfolder)
 
 
 WRITER_REGISTRY = Registry("video-writer")
@@ -227,12 +236,16 @@ def gather_valid_stride_data(
     """Gather replays from sampler"""
     print(f"Running over {indices.start} to {indices.stop} of {len(sampler)}")
 
-    mask_data = pd.DataFrame(
-        columns=["replayHash", "playerId", "validMask"],
-        index=indices,
-        # dtype=[("replayHash", "string"), ("playerId", "int"), ("validMask", "string")],
-        dtype="string",
-    )
+    # Pandas won't accept this being a dataframe, so using dict of series first
+    mask_data = {
+        "replayHash": pd.Series(
+            name="replayHash", index=indices, dtype=pd.StringDtype(storage="pyarrow")
+        ),
+        "validMask": pd.Series(
+            name="validMask", index=indices, dtype=pd.StringDtype(storage="pyarrow")
+        ),
+        "playerId": pd.Series(name="validMask", index=indices, dtype=pd.UInt8Dtype()),
+    }
 
     db = ReplayDataScalarOnlyDatabase()
     with make_pbar(len(indices), "Creating Masks", live) as pbar:
@@ -245,13 +258,13 @@ def gather_valid_stride_data(
             )
             write_idx = sample_idx - indices.start
             mask_data["replayHash"].iat[write_idx] = replay.header.replayHash
-            mask_data["playerId"].iat[write_idx] = str(replay.header.playerId)
+            mask_data["playerId"].iat[write_idx] = replay.header.playerId
             mask_data["validMask"].iat[write_idx] = "".join(
                 str(x.item()) for x in valid_mask.astype(np.uint8)
             )
             pbar.update(1)
 
-    return mask_data
+    return pd.DataFrame(mask_data)
 
 
 def run_valid_stride_creation(
