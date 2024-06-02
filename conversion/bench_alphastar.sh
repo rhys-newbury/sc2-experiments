@@ -1,4 +1,6 @@
 #!/bin/bash
+# There's a slightly modified AlphaStar-Unplugged codebase in a private repo that contains extra logging
+# code, adding some simple timing logs should be simple enough for users of this script to do...
 
 start_time=$(date +%s)
 
