@@ -39,7 +39,7 @@
             "args": [
                 "--workspace=workspace",
                 "--epoch=10",
-                "--config-file=cfg/dali-sql-folder.yml",
+                "--config-file=cfg/minimap-unet-residule.yml",
                 "--pbar",
                 "--brief=testing outcome forecast",
                 "--workers=8",

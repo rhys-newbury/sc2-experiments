@@ -202,8 +202,8 @@ def get_valid_start_mask(game_step: list[int], stride: int, length: int):
     return valid_starts
 
 
-def sampler_from_config(conf_file: Path) -> SQLSampler:
-    """Create SQLSampler from config file"""
+def get_sampler_config(conf_file):
+    """Extract sql sampler configuration from file"""
     with open(conf_file, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
@@ -214,6 +214,12 @@ def sampler_from_config(conf_file: Path) -> SQLSampler:
         assert config["sampler_cfg"]["type"] == "sql"
         config = config["sampler_cfg"]["args"]
 
+    return config
+
+
+def sampler_from_config(conf_file: Path) -> SQLSampler:
+    """Create SQLSampler from config file"""
+    config = get_sampler_config(conf_file)
     return SQLSampler(
         replays_path=Path(os.environ["DATAPATH"]),
         is_train=True,
@@ -268,7 +274,7 @@ def gather_valid_stride_data(
 
 
 def run_valid_stride_creation(
-    config: Path,
+    sampler: SQLSampler,
     output: Path,
     stride: int,
     sequence_len: int,
@@ -276,14 +282,10 @@ def run_valid_stride_creation(
     live: bool,
 ):
     """Run valid stride creation and write to file"""
-    sampler = sampler_from_config(config)
     mask_data = gather_valid_stride_data(sampler, stride, sequence_len, live, indices)
-
-    output /= f"replay_mask_{stride}_{sequence_len}.parquet"
     # If shard then add shard start idx to filename
     if indices.start != 0 or indices.stop != len(sampler):
         output = output.with_name(f"{output.stem}_{indices.start}.parquet")
-
     mask_data.to_parquet(output, compression=None)
 
 
@@ -306,13 +308,15 @@ def create_valid_stride(
     sampling the replay until we find a good subsequence when dataloading.
     """
     stride = int(step_sec * 22.4)
-    total_len = len(sampler_from_config(config))
+    sampler = sampler_from_config(config)
+    total_len = len(sampler)
+    output /= f"replay_mask_{stride}_{sequence_len}.parquet"
     if workers > 1:
         with fut.ProcessPoolExecutor(workers) as ctx:
             work = [
                 ctx.submit(
                     run_valid_stride_creation,
-                    config,
+                    sampler,
                     output,
                     stride,
                     sequence_len,
@@ -322,18 +326,23 @@ def create_valid_stride(
                 for part in get_subsequences(total_len, workers)
             ]
             fut.wait(work)
-        merge_valid_stride(output, step_sec, sequence_len, clean=True)
-        return
-
-    if "POD_NAME" in os.environ:
+        merge_valid_stride(output.parent, step_sec, sequence_len, clean=True)
+    elif "POD_NAME" in os.environ:  # Get partition from k8s pod index and replicas
         part = get_partition_range(
             total_len,
             int(os.environ["POD_NAME"].split("-")[-1]),
             int(os.environ["REPLICAS"]),
         )
-    else:
-        part = range(total_len)
-    run_valid_stride_creation(config, output, stride, sequence_len, part, live)
+        run_valid_stride_creation(sampler, output, stride, sequence_len, part, live)
+    else:  # Run over entire dataset on one thread
+        run_valid_stride_creation(
+            sampler, output, stride, sequence_len, range(total_len), live
+        )
+
+    # Log the configuration used to generate parquet file
+    config_dict = get_sampler_config(config)
+    with open(output.with_suffix(".yml"), "w", encoding="utf-8") as f:
+        yaml.dump(config_dict, f)
 
 
 @app.command()

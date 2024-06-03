@@ -1,5 +1,15 @@
 # sc2-experiments
-Repo contains ML experiments using [sc2-serializer](https://github.com/5had3z/sc2-serializer) datasets. Most experimental setups only take a few hours to run for convergence, and were trained on GTX 1080 or RTX 3090 depending on VRAM requirements for the model.
+Repo contains ML experiments using [sc2-serializer](https://github.com/5had3z/sc2-serializer) datasets. Most experimental setups only take a few hours to run for convergence, and were trained on GTX 1080 or RTX 3090 depending on VRAM requirements for the model. Model weights, configuration and training logs from the reported experiments are provided on [Google Drive](https://drive.google.com/drive/u/1/folders/1zlDo88efK6rg-PYbslFTBF-H_TJvJ-Nr). However, some of the configurations are from an older version of the codebase so some of the keyword arguments have changed.
+
+## Basic Repo Usage
+
+### Training
+
+The [train.py](./forecasting/train.py) is the main entrypoint for training all the different task and model variations. Set the environemnt variable `DATAPATH` to point to where the datasets are located. This repo is compatible with `torchrun` for distributed data-parallel training.  An example training (and evaluation) launch command is included in [launch.json](./.vscode/launch.json).
+
+### Evaluating
+
+Standard evaluation statistics generated during training must be gathered with `konduct-metadata reduce-all --workspace=$WORSPACE_HERE` before it can be displayed in `konduct-review`. Additional evaluation statistics are generated with [minimap_eval.py](./forecasting/minimap_eval.py) and [outcome_eval](./forecasting/outcome_eval.py). To view results and include the additional pages from this repo, use [review.py](./forecasting/review.py) .
 
 ## Outcome Forecasting
 
