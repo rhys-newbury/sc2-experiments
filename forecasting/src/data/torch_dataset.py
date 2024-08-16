@@ -100,7 +100,7 @@ class SC2ReplayOutcome(SC2ReplayBase):
         """Process replay data currently in parser into dictionary of
         features and game outcome"""
         try:
-            test_sample: dict[str, Any] = self.parser.sample(0)
+            test_sample: dict[str, Any] = self.parser.sample_all(0)
         except (RuntimeError, IndexError) as err:
             raise RuntimeError(f"Parse failure for {self.parser.info}") from err
 
@@ -121,7 +121,7 @@ class SC2ReplayOutcome(SC2ReplayBase):
             if idx == -1:
                 sample = {k: np.zeros_like(test_sample[k]) for k in outputs_list}
             else:
-                sample = self.parser.sample(int(idx.item()))
+                sample = self.parser.sample_all(int(idx.item()))
             for k in outputs_list:
                 outputs_list[k].append(sample[k])
 

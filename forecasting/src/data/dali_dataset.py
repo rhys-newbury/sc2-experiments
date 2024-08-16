@@ -324,7 +324,7 @@ class DaliReplayClipDataset(DALIExternalSource):
         outputs_list = {k: [] for k in self.features}
 
         for idx in sample_indices:
-            sample = self.parser.sample(int(idx.item()))
+            sample = self.parser.sample_all(int(idx.item()))
             for k in outputs_list:
                 outputs_list[k].append(sample[k])
 

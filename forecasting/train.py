@@ -40,11 +40,11 @@ class Trainer(PyTorchTrainer):
         elif torch.cuda.is_available():
             stream = torch.cuda.Stream()
 
-            def filter(x: Tensor | list):
+            def filter_(x: Tensor | list):
                 return x.cuda(non_blocking=True) if isinstance(x, Tensor) else x
 
             with torch.cuda.stream(stream):
-                data = {k: filter(d) for k, d in data.items()}
+                data = {k: filter_(d) for k, d in data.items()}
 
             stream.synchronize()
 

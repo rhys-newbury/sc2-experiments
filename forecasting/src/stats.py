@@ -349,7 +349,9 @@ class MinimapSoftIoU(Statistic):
         target_minimaps = targets["minimaps"][:, :, self.target_ch]
         next_minimap = target_minimaps[:, self.sequence_len :]
         static_unit_mask = torch.sum(target_minimaps, dim=1) != target_minimaps.shape[1]
-        diff_frame_mask = target_minimaps[:, [self.sequence_len - 1]] != next_minimap
+        diff_frame_mask = (
+            target_minimaps[:, self.sequence_len - 1, None] != next_minimap
+        )
 
         if self.should_sigmoid:
             predictions = torch.sigmoid(predictions)
