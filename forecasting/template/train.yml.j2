@@ -41,7 +41,7 @@ spec:
                 ]
               env:
                 - name: DATAPATH
-                  value: /mnt/storage/{{ dataset }}
+                  value: /mnt/database/{{ dataset }}
               resources:
                 requests:
                   memory: {{ mem }}Gi
@@ -52,15 +52,27 @@ spec:
                   cpu: {{ (cpu * 1.5) | int }}m
                   nvidia.com/gpu: {{ n_gpu }}
               volumeMounts:
+                - name: database
+                  mountPath: /mnt/database
                 - name: storage
                   mountPath: /mnt/storage
                 - name: dshm
                   mountPath: /dev/shm
           volumes:
-            - name: storage
+            - name: database
               nfs:
                 server: 130.194.128.238
                 path: /mnt/fast/more-users/bryce-rhys
+            - name: storage                                     # whatever you want to call the volume
+              flexVolume:
+                driver: fstab/cifs
+                fsType: cifs
+                secretRef:
+                  name: smb-creds                                 # name of nas secret defined previously
+                options:
+                  networkPath: //130.194.128.94/slow
+                  mountOptions: dir_mode=0755,file_mode=0644,noperm # idk, just works
+
             - name: dshm
               emptyDir:
                 medium: Memory

@@ -5,7 +5,7 @@ dataset:
     val_loader:
       type: DALI
       args:
-        batch_size: 128
+        batch_size: 64
         drop_last: true
     train_loader:
       type: DALI

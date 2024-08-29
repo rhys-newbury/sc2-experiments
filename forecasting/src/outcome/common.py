@@ -7,6 +7,42 @@ from konductor.models import MODEL_REGISTRY
 from torch import nn, Tensor
 
 from ..utils import TimeRange
+from torchvision.models import resnet18
+
+
+@MODEL_REGISTRY.register_module("resnet18-v1")
+class ResNet18(nn.Module):
+    is_logit_output = True
+
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int = 32,
+        pretrained: bool = True,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        # Load the pre-trained ResNet18 model
+        self.encoder = resnet18(pretrained=pretrained)
+
+        # Modify the first convolutional layer to accept in_ch channels
+        self.encoder.conv1 = nn.Conv2d(
+            in_ch, 64, kernel_size=7, stride=2, padding=3, bias=False
+        )
+
+        # Modify the final fully connected layer to output out_ch channels
+        self.encoder.fc = nn.Linear(self.encoder.fc.in_features, out_ch)
+
+        self.dropout = nn.Dropout(dropout)
+
+        self._out_ch = out_ch
+
+    @property
+    def out_ch(self):
+        return self._out_ch
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.dropout(self.encoder(x))
 
 
 @MODEL_REGISTRY.register_module("image-v1")

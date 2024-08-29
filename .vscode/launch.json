@@ -34,16 +34,16 @@
             "request": "launch",
             "program": "${workspaceFolder}/forecasting/train.py",
             "console": "integratedTerminal",
-            "justMyCode": true,
+            "justMyCode": false,
             "cwd": "${workspaceFolder}/forecasting",
             "args": [
-                "--workspace=workspace",
+                "--workspace=.",
                 "--epoch=10",
-                "--config-file=cfg/minimap-unet-residule.yml",
+                "--config-file=cfg/outcome-both.yml",
                 "--pbar",
                 "--brief=testing outcome forecast",
-                "--workers=8",
-                "--dali-py-workers=6"
+                "--workers=2",
+                "--dali-py-workers=1"
             ],
             "envFile": "${workspaceFolder}/.env"
         },
