@@ -254,11 +254,14 @@ class ScalarEncoderV2(nn.Module):
         out_ch: int = 32,
         n_layers: int = 2,
         dropout: float = 0.0,
+        use_other_player: bool = False,
     ) -> None:
         super().__init__()
         if isinstance(strategy, str):
             strategy = ScalarEncoderV2.Strategy[strategy]
         in_ch -= 1  # We are not processing the gameStep feature
+        in_ch *= 1 + use_other_player
+        self.use_other_player = use_other_player
         self.timerange: Tensor
         self.register_buffer("timerange", timerange.arange(), persistent=False)
         self.time_idx = time_idx
@@ -297,7 +300,9 @@ class ScalarEncoderV2(nn.Module):
 
         with torch.autocast("cuda", enabled=False):
             norm_idx = mod_idx if len(self.batch_norms) > 1 else 0
-            norm_feats = self.batch_norms[norm_idx](inputs[..., :-1])
+            norm_feats = self.batch_norms[norm_idx](
+                inputs[..., : -(1 + self.use_other_player)]
+            )
 
         params_idx = mod_idx if len(self.encoders) > 1 else 0
         feats = self.encoders[params_idx](norm_feats)

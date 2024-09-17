@@ -2,6 +2,7 @@ dataset:
   - type: dali-folder
     args:
       features: [win, valid, minimaps, scalars]
+      load_other_player: True
     val_loader:
       type: DALI
       args:
@@ -22,11 +23,13 @@ model:
       dropout: 0.2
       image_enc:
         type: image-v1
-        args: {}
+        args:
+          in_ch: 12
       scalar_enc:
         type: scalar-v2
         args:
           strategy: batch_norm
+          use_other_player: True
       decoder:
         type: scalar-v1
         args:
