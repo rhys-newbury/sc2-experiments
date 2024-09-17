@@ -170,3 +170,5 @@ forecasting/wandb/
 *.tf_record
 *.db
 *manifest
+
+forecasting/workspace

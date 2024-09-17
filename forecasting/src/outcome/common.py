@@ -7,10 +7,10 @@ from konductor.models import MODEL_REGISTRY
 from torch import nn, Tensor
 
 from ..utils import TimeRange
-from torchvision.models import resnet18
+import torchvision.models
 
 
-@MODEL_REGISTRY.register_module("resnet18-v1")
+@MODEL_REGISTRY.register_module("pretrained-v1")
 class ResNet18(nn.Module):
     is_logit_output = True
 
@@ -20,10 +20,13 @@ class ResNet18(nn.Module):
         out_ch: int = 32,
         pretrained: bool = True,
         dropout: float = 0.0,
+        model_name: str = "resnet18",
+        freeze_until_idx: int
+        | None = None,  # parameter to specify index until which layers are frozen
     ) -> None:
         super().__init__()
-        # Load the pre-trained ResNet18 model
-        self.encoder = resnet18(pretrained=pretrained)
+
+        self.encoder = getattr(torchvision.models, model_name)(pretrained=pretrained)
 
         # Modify the first convolutional layer to accept in_ch channels
         self.encoder.conv1 = nn.Conv2d(
@@ -33,6 +36,14 @@ class ResNet18(nn.Module):
         # Modify the final fully connected layer to output out_ch channels
         self.encoder.fc = nn.Linear(self.encoder.fc.in_features, out_ch)
 
+        # Freeze layers by index if specified
+        if freeze_until_idx is not None:
+            self.freeze_until_index(freeze_until_idx)
+
+        # Ensure that the modified layers (conv1 and fc) are trainable
+        self.unfreeze_layer(self.encoder.conv1)
+        self.unfreeze_layer(self.encoder.fc)
+
         self.dropout = nn.Dropout(dropout)
 
         self._out_ch = out_ch
@@ -40,6 +51,17 @@ class ResNet18(nn.Module):
     @property
     def out_ch(self):
         return self._out_ch
+
+    def freeze_until_index(self, freeze_until_idx: int) -> None:
+        for idx, param in enumerate(self.encoder.named_parameters()):
+            if idx < freeze_until_idx:
+                param[1].requires_grad = False
+            else:
+                param[1].requires_grad = True
+
+    def unfreeze_layer(self, layer) -> None:
+        for param in layer.parameters():
+            param.requires_grad = True
 
     def forward(self, x: Tensor) -> Tensor:
         return self.dropout(self.encoder(x))

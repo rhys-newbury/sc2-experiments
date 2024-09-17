@@ -37,7 +37,7 @@
             "justMyCode": false,
             "cwd": "${workspaceFolder}/forecasting",
             "args": [
-                "--workspace=.",
+                "--workspace=./workspace/",
                 "--epoch=10",
                 "--config-file=cfg/outcome-both.yml",
                 "--pbar",
