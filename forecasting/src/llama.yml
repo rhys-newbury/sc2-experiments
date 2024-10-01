@@ -1,0 +1,7 @@
+database: /run/user/1000/gvfs/nfs:host=130.194.128.94,prefix=%2Fmnt%2Ffast%2Fmore-users%2Fbryce-rhys/converted/tournaments/gamedata.db
+dataFolder: /run/user/1000/gvfs/nfs:host=130.194.128.94,prefix=%2Fmnt%2Ffast%2Fmore-users%2Fbryce-rhys/converted/tournaments/
+sql_filters: ["game_length > 6720", "read_success = 1", "parse_success = 1", "playerAPM > 30"]
+timepoints:
+  min: 2
+  max: 30
+  step: 0.5

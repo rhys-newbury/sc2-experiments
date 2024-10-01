@@ -14,6 +14,26 @@ from .utils import get_valid_sequence_mask
 from .minimap.common import MinimapTarget, BaseConfig as MinimapModelCfg
 
 
+class TimeWeightedBCE(nn.Module):
+    def __init__(self, pred_is_logit: bool) -> None:
+        super().__init__()
+        self.loss_fn = (
+            F.binary_cross_entropy_with_logits
+            if pred_is_logit
+            else F.binary_cross_entropy
+        )
+
+    def forward(self, pred: Tensor, data: dict[str, Tensor]) -> dict[str, Tensor]:
+        win_repeat = data["win"].unsqueeze(-1).repeat(1, pred.shape[1])
+        loss = self.loss_fn(pred, win_repeat, reduction="none")
+        time_weights = (
+            torch.linspace(0.5, 1.0, pred.shape[1]).unsqueeze(0).to(pred.device)
+        )
+
+        loss *= data["valid"] * time_weights
+        return {"timeweighted-win-bce": loss.mean()}
+
+
 class WinBCE(nn.Module):
     def __init__(self, pred_is_logit: bool) -> None:
         super().__init__()
@@ -26,8 +46,25 @@ class WinBCE(nn.Module):
     def forward(self, pred: Tensor, data: dict[str, Tensor]) -> dict[str, Tensor]:
         win_repeat = data["win"].unsqueeze(-1).repeat(1, pred.shape[1])
         loss = self.loss_fn(pred, win_repeat, reduction="none")
+
         loss *= data["valid"]
         return {"win-bce": loss.mean()}
+
+
+@dataclass
+@REGISTRY.register_module("timeweighted-win-bce")
+class TimeWeightedWinBCECfg(LossConfig):
+    model_output_logits: bool = True
+
+    @classmethod
+    def from_config(cls, config: ExperimentInitConfig, idx: int, **kwargs):
+        model = get_model_config(config=config).get_instance()
+        if model.is_logit_output:  # check Truth and None
+            config.criterion[idx].args["model_output_logits"] = model.is_logit_output
+        return super().from_config(config, idx, **kwargs)
+
+    def get_instance(self, *args, **kwargs):
+        return TimeWeightedBCE(self.model_output_logits)
 
 
 @dataclass

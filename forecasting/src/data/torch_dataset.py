@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, TypeVar
 from zipfile import BadZipFile
 
 import numpy as np
@@ -12,13 +12,25 @@ from sc2_serializer import Result, get_database_and_parser
 from sc2_serializer.sampler import ReplaySampler
 from torch.utils.data import Dataset
 
-from ..utils import TimeRange
+from utils import TimeRange
 from .base_dataset import (
     SAMPLER_REGISTRY,
     SC2FolderCfg,
     SC2SamplerCfg,
     find_closest_indices,
 )
+
+T = TypeVar("T")
+
+
+def all_same(iterable: Iterable[T]) -> bool:
+    """Check if all elements in the iterable are the same."""
+    iterator = iter(iterable)
+    try:
+        first = next(iterator)
+    except StopIteration:
+        return True
+    return all(element == first for element in iterator)
 
 
 class SC2ReplayBase(Dataset):
@@ -32,11 +44,13 @@ class SC2ReplayBase(Dataset):
         features: list[str],
         minimap_layers: list[str] | None = None,
         metadata: bool = False,
+        load_other_player=False,
     ):
         super().__init__()
         self.sampler = sampler
         self.features = features
         self.metadata = metadata
+        self.load_other_player = load_other_player
         self.logger = logging.getLogger("replay-dataset")
         if features is not None:
             self.db_handle, self.parser = get_database_and_parser(
@@ -58,19 +72,32 @@ class SC2ReplayBase(Dataset):
         raise NotImplementedError
 
     def __getitem__(self, index: int):
-        replay_file, replay_idx = self.sampler.sample(index)
-        if not self.db_handle.load(replay_file):
-            raise FileNotFoundError(replay_file)
-        replay_data = self.db_handle.getEntry(replay_idx)
-        self.parser.parse_replay(replay_data)
-        outputs = self.process_replay()
+        indices = (
+            [index] if not self.load_other_player else [index, index + (-1) ** index]
+        )
+        all_outputs = []
+        for i in indices:
+            replay_file, replay_idx = self.sampler.sample(i)
 
-        if self.metadata:
-            outputs["metadata"] = self.parser.info.replayHash + str(
-                self.parser.info.playerId
-            )
+            if not self.db_handle.load(replay_file):
+                raise FileNotFoundError(replay_file)
+            replay_data = self.db_handle.getEntry(replay_idx)
+            self.parser.parse_replay(replay_data)
+            outputs = self.process_replay()
 
-        return outputs
+            if self.metadata:
+                outputs["metadata"] = self.parser.info.replayHash + str(
+                    self.parser.info.playerId
+                )
+            all_outputs.append(outputs)
+        if not all_same(x["metadata"][:-1] for x in all_outputs):
+            return None
+
+        return {
+            key: torch.stack([item[key] for item in all_outputs], dim=0).squeeze()
+            for key in outputs.keys()
+            if isinstance(outputs[key], torch.Tensor)
+        }
 
 
 class SC2ReplayOutcome(SC2ReplayBase):
@@ -84,8 +111,9 @@ class SC2ReplayOutcome(SC2ReplayBase):
         metadata: bool = False,
         minimap_layers: list[str] | None = None,
         min_game_time: float | None = None,
+        load_other_player: bool = False,
     ) -> None:
-        super().__init__(sampler, features, minimap_layers, metadata)
+        super().__init__(sampler, features, minimap_layers, metadata, load_other_player)
 
         _loop_per_min = 22.4 * 60
         self._target_game_loops = (timepoints.arange() * _loop_per_min).to(torch.int)
@@ -100,7 +128,7 @@ class SC2ReplayOutcome(SC2ReplayBase):
         """Process replay data currently in parser into dictionary of
         features and game outcome"""
         try:
-            test_sample: dict[str, Any] = self.parser.sample_all(0)
+            test_sample: dict[str, Any] = self.parser.sample(0)
         except (RuntimeError, IndexError) as err:
             raise RuntimeError(f"Parse failure for {self.parser.info}") from err
 
@@ -121,7 +149,7 @@ class SC2ReplayOutcome(SC2ReplayBase):
             if idx == -1:
                 sample = {k: np.zeros_like(test_sample[k]) for k in outputs_list}
             else:
-                sample = self.parser.sample_all(int(idx.item()))
+                sample = self.parser.sample(int(idx.item()))
             for k in outputs_list:
                 outputs_list[k].append(sample[k])
 

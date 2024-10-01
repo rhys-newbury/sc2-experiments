@@ -55,14 +55,13 @@ class DaliFolderDataset(DALIExternalSource):
         num_shards: int,
         random_shuffle: bool,
         yields_batch: bool = False,
-        file_suffix: str = "",
         load_other_player: bool = False,
     ) -> None:
         super().__init__(batch_size, shard_id, num_shards, random_shuffle, yields_batch)
         self.split = split
         self.features = features
         self.folder = path / split.name.lower()
-        self.file_suffix = file_suffix
+        self.file_suffix = "-binary" if load_other_player else "file_suffix"
         self.load_other_player = load_other_player
 
         if not self.folder.exists():

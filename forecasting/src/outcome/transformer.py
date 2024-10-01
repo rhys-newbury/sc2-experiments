@@ -12,20 +12,24 @@ class TransformerDecoderV1(nn.Module):
         in_ch: int,
         max_time: float,
         hidden_size: int = 32,
+        out_ch: int = 1,
         num_layers: int = 2,
         num_head: int = 4,
         num_time_freq: int = 8,
         max_time_freq: int = 8,
         residule_add: bool = False,
+        dropout: float = 0.0,
     ):
         """Max time in minutes, will be converted internally to gameloops"""
         super().__init__()
         self.squeeze = nn.Linear(in_ch, hidden_size)
-        self.decode = nn.Linear(hidden_size + num_time_freq * 2, 1)
+        self.decode = nn.Linear(hidden_size + num_time_freq * 2, out_ch)
 
         self.max_time = max_time / (22.4 * 60)
         self.num_freq = num_time_freq
         self.max_freq = max_time_freq
+
+        self._out_ch = out_ch
 
         enc_layer = nn.TransformerEncoderLayer(
             hidden_size + self.num_freq * 2, nhead=num_head
@@ -40,6 +44,10 @@ class TransformerDecoderV1(nn.Module):
         self.residule_add = residule_add
         if residule_add:
             self.residule_linear = nn.Linear(in_ch, hidden_size + self.num_freq * 2)
+
+    @property
+    def out_ch(self):
+        return self._out_ch
 
     @torch.no_grad()
     def create_time_embeddings(self, timepoints: Tensor):
