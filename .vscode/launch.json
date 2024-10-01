@@ -16,6 +16,15 @@
             ]
         },
         {
+            "name": "Llama",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/forecasting/src/llama.py",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false
+        },
+        {
             "name": "Eval",
             "type": "debugpy",
             "request": "launch",
@@ -39,7 +48,7 @@
             "args": [
                 "--workspace=./workspace/",
                 "--epoch=10",
-                "--config-file=cfg/outcome-both.yml",
+                "--config-file=cfg/transformer.yml",
                 "--pbar",
                 "--brief=testing outcome forecast",
                 "--workers=2",
