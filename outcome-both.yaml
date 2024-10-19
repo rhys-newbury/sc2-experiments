@@ -1,0 +1,100 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  name: interactive
+spec:
+  maxRetry: 1
+  minAvailable: 1
+  schedulerName: volcano
+  queue: default
+  tasks:
+    - replicas: 1
+      name: train
+      template:
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: dkr-creds
+          securityContext:
+            runAsUser: 1000
+          nodeSelector:
+            nvidia.com/gpu.product: NVIDIA-GeForce-RTX-3090
+          containers:
+            - name: runner
+              image: mu00120825.eng.monash.edu.au:5002/sc2-experiments:master
+              imagePullPolicy: Always
+              command: ["/bin/bash", "-c", "--"]
+              args: ["while true; do sleep 30; done;"]
+              env:
+                - name: DATAPATH
+                  value: /mnt/database/outcome-subset-tournament
+              resources:
+                requests:
+                  memory: 20Gi
+                  cpu: 4000m
+                  nvidia.com/gpu: 1
+                limits:
+                  memory: 24Gi
+                  cpu: 6000m
+                  nvidia.com/gpu: 1
+              volumeMounts:
+                - name: database
+                  mountPath: /mnt/database
+                - name: storage
+                  mountPath: /mnt/storage
+                - name: dshm
+                  mountPath: /dev/shm
+                - name: pretrained
+                  mountPath: /mnt/pretrained
+                - name: slow                            # Add the slow SMB share
+                  mountPath: /mnt/slow
+                - name: fast                            # Add the fast SMB share
+                  mountPath: /mnt/fast
+          volumes:
+            - name: database
+              nfs:
+                server: 130.194.128.238
+                path: /mnt/fast/more-users/bryce-rhys
+            - name: pretrained                                     # whatever you want to call the volume
+              flexVolume:
+                driver: fstab/cifs
+                fsType: cifs
+                secretRef:
+                  name: smb-creds                                 # name of nas secret defined previously
+                options:
+                  networkPath: //130.194.128.94/pretrained-models
+                  mountOptions: dir_mode=0755,file_mode=0644,noperm
+
+            - name: storage                                     # whatever you want to call the volume
+              flexVolume:
+                driver: fstab/cifs
+                fsType: cifs
+                secretRef:
+                  name: smb-creds                                 # name of nas secret defined previously
+                options:
+                  networkPath: //130.194.128.94/slow
+                  mountOptions: dir_mode=0755,file_mode=0644,noperm
+
+            - name: slow                                     # Add the volume for slow SMB share
+              flexVolume:
+                driver: fstab/cifs
+                fsType: cifs
+                secretRef:
+                  name: smb-creds
+                options:
+                  networkPath: //130.194.128.94/slow         # Path to the slow share
+                  mountOptions: dir_mode=0755,file_mode=0644,noperm
+
+            - name: fast                                     # Add the volume for fast SMB share
+              flexVolume:
+                driver: fstab/cifs
+                fsType: cifs
+                secretRef:
+                  name: smb-creds
+                options:
+                  networkPath: //130.194.128.94/fast         # Path to the fast share
+                  mountOptions: dir_mode=0755,file_mode=0644,noperm
+
+            - name: dshm
+              emptyDir:
+                medium: Memory

@@ -19,7 +19,7 @@
             "name": "Llama",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/forecasting/src/llama.py",
+            "program": "${workspaceFolder}/forecasting/src/llama_script.py",
             "console": "integratedTerminal",
             "envFile": "${workspaceFolder}/.env",
             "justMyCode": false

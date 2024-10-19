@@ -1,0 +1,50 @@
+criterion:
+- args: {}
+  type: win-bce
+dataset:
+- args:
+    features:
+    - win
+    - valid
+    - minimaps
+    - scalars
+  train_loader:
+    args:
+      batch_size: 64
+      drop_last: true
+      shuffle: true
+    type: DALI
+  type: dali-folder
+  val_loader:
+    args:
+      batch_size: 64
+      drop_last: true
+    type: DALI
+logger:
+  interval: 500
+model:
+- args:
+    decoder:
+      args:
+        out_ch: 1
+      type: scalar-v1
+    dropout: 0.2
+    image_enc:
+      args: {}
+      type: image-v1
+    scalar_enc:
+      args:
+        strategy: batch_norm
+      type: scalar-v2
+  optimizer:
+    args:
+      gradient_clipping: 0.01
+      lr: 1.0e-05
+      step_interval: 1
+    scheduler:
+      args:
+        max_iter: 25
+        power: 0.9
+      type: poly
+    type: adam
+  type: snapshot-prediction

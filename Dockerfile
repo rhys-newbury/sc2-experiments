@@ -29,8 +29,13 @@ RUN mkdir database_tools && cd database_tools && \
 
 RUN pip install git+https://github.com/5had3z/konductor@93f117a7db290046450155c23f6805b43e5e1269
 
+RUN pip install fire sentencepiece fairscale
 ARG COMMIT
 RUN [ ! -z "${COMMIT}" ]
 ENV COMMIT_SHA=${COMMIT}
 
-COPY . .
+RUN useradd -m -u 1000 newuser
+
+USER newuser
+
+COPY --chown=newuser: . .
