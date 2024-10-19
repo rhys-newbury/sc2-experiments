@@ -330,3 +330,107 @@ class ScalarEncoderV2(nn.Module):
         feats = self.encoders[params_idx](norm_feats)
 
         return feats
+
+@MODEL_REGISTRY.register_module("vit-v2")
+class VIT2(nn.Module):
+    is_logit_output = True
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int = 32,
+        pretrained: bool = True,
+        dropout: float = 0.0,
+        freeze: bool = False
+    ) -> None:
+        super().__init__()
+        self.encoder = models.vit_b_16(pretrained=pretrained)
+        if freeze:
+            # Freeze all layers except the final layer
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+        self.encoder.heads.head = torch.nn.Linear(self.encoder.heads.head.in_features, out_ch)
+        if freeze:
+            # Ensure the final layer's parameters are trainable
+            for param in self.encoder.heads.head.parameters():
+                param.requires_grad = True
+        self.transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
+        ])
+        self.color_list = torch.Tensor([
+            [255, 0, 0],    # Red
+            [0, 255, 0],    # Green
+            [0, 0, 255],    # Blue
+            [255, 255, 0],  # Yellow
+            [0, 255, 255],  # Cyan
+            [255, 0, 255],  # Magenta
+            [128, 0, 0],    # Maroon
+            [0, 128, 0],    # Dark Green
+            [0, 0, 128],    # Navy
+            [128, 128, 0],  # Olive
+            [128, 0, 128],  # Purple
+            [0, 128, 128]   # Teal
+        ]).cuda() // 6
+        self._out_ch = out_ch
+    @property
+    def out_ch(self):
+        return self._out_ch
+    def forward(self, x: Tensor) -> Tensor:
+        p_image = torch.zeros_like(x[:, 0:1, :, :]).repeat(1,3,1,1)
+        for idx, l in enumerate(self.color_list[:6]):
+            image = x[:, idx:idx+1, :, :].repeat(1,3,1,1) * l.view(1,3,1,1)
+            p_image += image
+        for idx, l in enumerate(self.color_list[6:], 6):
+            image = x[:, idx, :, :][:, None, :, :].repeat(1,3,1,1) * l.view(1,3,1,1)
+            p_image += image
+        with torch.no_grad():
+            x = self.transform(p_image)
+        return self.encoder(x)
+    
+@MODEL_REGISTRY.register_module("vit-v1")
+class VIT(nn.Module):
+    is_logit_output = True
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int = 32,
+        pretrained: bool = True,
+        dropout: float = 0.0,
+        freeze: bool = False
+    ) -> None:
+        super().__init__()
+        self.encoder = models.vit_b_16(pretrained=pretrained)
+        if freeze:
+            # Freeze all layers except the final layer
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+        self.encoder.heads.head = torch.nn.Linear(self.encoder.heads.head.in_features, out_ch)
+        if freeze:
+            # Ensure the final layer's parameters are trainable
+            for param in self.encoder.heads.head.parameters():
+                param.requires_grad = True
+        self.transform = transforms.Compose([
+            transforms.Resize((224,224)),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
+        ])
+        self._out_ch = out_ch
+    @property
+    def out_ch(self):
+        return self._out_ch
+    def forward(self, x: Tensor) -> Tensor:
+        rows = []
+        for i in range(0, x.shape[1], 3):
+            image0 = x[:, i, :, :]
+            image1 = x[:, i+1, :, :]
+            image2 = x[:, i+2, :, :]
+            rows.append(torch.concat((image0, image1, image2), dim=1))
+        x = torch.concat(rows, dim=-1)[:, None, :, :].repeat(1,3,1,1)
+        with torch.no_grad():
+            x = self.transform(x)
+        return self.encoder(x)
